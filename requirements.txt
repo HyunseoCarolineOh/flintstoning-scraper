@@ -1,0 +1,7 @@
+pandas
+gspread
+gspread-dataframe
+selenium
+webdriver-manager
+selenium-stealth
+google-auth
