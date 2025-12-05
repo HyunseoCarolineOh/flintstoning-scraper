@@ -14,9 +14,7 @@ from selenium_stealth import stealth
 from datetime import datetime
 import random
 
-# ==========================================
-# 1. 구글 시트 인증
-# ==========================================
+# 1. 인증
 json_creds = json.loads(os.environ['GOOGLE_CREDENTIALS'])
 scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
 creds = Credentials.from_service_account_info(json_creds, scopes=scope)
@@ -33,9 +31,10 @@ def save_to_sheet(sheet_url, new_data):
             worksheet = doc.get_worksheet(0)
             
         if not worksheet:
-            print("[원티드] 탭을 찾을 수 없습니다.")
+            print("❌ [오류] 탭을 찾을 수 없습니다.")
             return
 
+        # 기존 데이터 로딩
         existing_df = get_as_dataframe(worksheet, header=0)
         existing_data_count = len(existing_df.dropna(how='all'))
         next_row = existing_data_count + 2
@@ -44,25 +43,28 @@ def save_to_sheet(sheet_url, new_data):
             existing_urls = worksheet.col_values(3)[1:]
         except:
             existing_urls = []
+            
+        print(f"📊 현재 시트 데이터: {len(existing_urls)}개")
 
         final_data = []
         for item in new_data:
             if item['url'] not in existing_urls:
                 final_data.append(item)
+            else:
+                # 디버깅용 로그: 중복이라 건너뛴 경우 출력
+                print(f"   🚫 중복 제외됨: {item['title']}")
         
         if final_data:
             df = pd.DataFrame(final_data)
             set_with_dataframe(worksheet, df, row=next_row, include_column_header=False)
-            print(f"[원티드] {len(final_data)}개 저장 완료!")
+            print(f"✅ [저장 성공] {len(final_data)}개 행이 추가되었습니다!")
         else:
-            print("[원티드] 새로운 데이터가 없습니다.")
+            print("💤 [저장 안함] 모든 데이터가 이미 시트에 있습니다.")
             
     except Exception as e:
-        print(f"[원티드] 저장 실패: {e}")
+        print(f"❌ [저장 실패] {e}")
 
-# ==========================================
 # 2. 브라우저 설정
-# ==========================================
 options = Options()
 options.add_argument('--headless')
 options.add_argument('--no-sandbox')
@@ -81,51 +83,48 @@ stealth(driver,
 
 today_date = datetime.now().strftime('%Y-%m-%d')
 
-# ==========================================
-# 3. 원티드 크롤링 (태그 정밀 타격)
-# ==========================================
-print("▶ 원티드 수집 시작")
+print("▶ 원티드 접속 중...")
 driver.get("https://www.wanted.co.kr/wdlist/523/1635?country=kr&job_sort=job.popularity_order&years=-1&locations=all")
 time.sleep(10)
 
 for _ in range(5):
     driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-    time.sleep(random.uniform(3, 5))
+    time.sleep(random.uniform(2, 4))
     
 wanted_data = []
-
 all_links = driver.find_elements(By.TAG_NAME, "a")
 articles = [link for link in all_links if link.get_attribute("href") and "/wd/" in link.get_attribute("href")]
 
-for article in articles:
+print(f"🔎 발견된 링크 후보: {len(articles)}개")
+
+for i, article in enumerate(articles):
     try:
         link = article.get_attribute("href")
         
+        # [디버깅] 태그 찾기 시도
         try:
-            # 1. 제목 찾기
             title_tag = article.find_element(By.TAG_NAME, "strong")
             title = title_tag.text.strip()
             
-            # 2. 회사명 찾기
             company_tag = article.find_element(By.CSS_SELECTOR, "span[class*='company']")
             company = company_tag.text.strip()
             
             if title and company:
                  wanted_data.append({
-                    'title': title, 
-                    'subtitle': '', 
-                    'url': link, 
-                    'created_at': today_date, 
-                    'company': company, 
-                    'status': 'archived', # [수정됨] active -> archived 변경
-                    'publish': ''
+                    'title': title, 'subtitle': '', 'url': link, 
+                    'created_at': today_date, 'company': company, 'status': 'archived', 'publish': ''
                 })
         except:
+            # 태그를 못 찾으면 로그를 한 번 찍어봄 (처음 5개만)
+            if i < 5: 
+                print(f"   ⚠️ 파싱 실패 (태그 없음): {article.text[:20]}...")
             continue
             
     except: continue
 
-# ▼▼▼ [중요] 원티드 시트 주소 입력 ▼▼▼
+print(f"📝 수집된 유효 데이터: {len(wanted_data)}개")
+
+# ▼▼▼ [중요] 원티드 시트 주소 확인 ▼▼▼
 wanted_url = 'https://docs.google.com/spreadsheets/d/1nKPVCZ6zAOfpqCjV6WfjkzCI55FA9r2yvi9XL3iIneo/edit?gid=1818966683#gid=1818966683'
 save_to_sheet(wanted_url, wanted_data)
 
