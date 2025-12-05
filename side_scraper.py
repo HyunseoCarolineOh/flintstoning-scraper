@@ -22,7 +22,6 @@ gc = gspread.authorize(creds)
 
 def save_to_sheet(sheet_url, new_data):
     try:
-        # gid 추출 및 탭 연결
         if 'gid=' in sheet_url:
             target_gid = int(sheet_url.split('gid=')[1].split('#')[0])
             doc = gc.open_by_url(sheet_url)
@@ -35,18 +34,15 @@ def save_to_sheet(sheet_url, new_data):
             print("[사이드] 탭을 찾을 수 없습니다.")
             return
 
-        # 위치 계산
         existing_df = get_as_dataframe(worksheet, header=0)
         existing_data_count = len(existing_df.dropna(how='all'))
         next_row = existing_data_count + 2
         
-        # 중복 방지용 URL 확인
         try:
-            existing_urls = worksheet.col_values(3)[1:] # C열(URL)
+            existing_urls = worksheet.col_values(3)[1:]
         except:
             existing_urls = []
 
-        # 중복 제거
         final_data = []
         for item in new_data:
             if item['url'] not in existing_urls:
@@ -54,7 +50,6 @@ def save_to_sheet(sheet_url, new_data):
         
         if final_data:
             df = pd.DataFrame(final_data)
-            # 헤더 없이 데이터만 추가
             set_with_dataframe(worksheet, df, row=next_row, include_column_header=False)
             print(f"[사이드] {len(final_data)}개 저장 완료!")
         else:
@@ -76,51 +71,56 @@ driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), opti
 today_date = datetime.now().strftime('%Y-%m-%d')
 
 # ==========================================
-# 3. 사이드 프로젝트 수집 시작
+# 3. 사이드 프로젝트 수집 (필터링 대폭 완화)
 # ==========================================
 print("▶ 사이드 프로젝트 접속 중...")
-target_url = "https://sideproject.co.kr/projects"
-driver.get(target_url)
-time.sleep(5)
+driver.get("https://sideproject.co.kr/projects")
+time.sleep(7) # 로딩 대기 시간 늘림
+
+# 스크롤 내려서 데이터 확보
+for _ in range(3):
+    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+    time.sleep(2)
 
 side_data = []
+all_links = driver.find_elements(By.TAG_NAME, "a")
 
-# 게시글 링크(a 태그) 찾기
-# 보통 게시판 형태는 a 태그 안에 제목이 있거나, a 태그가 제목을 감싸고 있음
-all_links = driver.find_elements(By.CSS_SELECTOR, "a")
-
-print(f"🔎 탐색된 링크: {len(all_links)}개")
+print(f"🔎 발견된 전체 링크 수: {len(all_links)}개")
 
 for link in all_links:
     try:
         url = link.get_attribute("href")
         title = link.text.strip()
         
-        # 유효성 검사
-        # 1. URL이 있어야 하고
-        # 2. 제목이 적당히 길어야 함 (메뉴 버튼 제외)
-        # 3. '/projects/' 가 포함된 상세 페이지 링크여야 함
-        if url and title and len(title) > 5 and "/projects/" in url:
+        # [수정됨] URL 규칙 검사 삭제!
+        # 그냥 제목이 7글자 이상이고, 메뉴(로그인 등)가 아니면 무조건 수집
+        if url and title and len(title) > 7:
             
-            # 리스트에 중복으로 잡히는 경우가 있어서 확인
+            # 메뉴나 불필요한 링크 제외
+            ignore_words = ["로그인", "회원가입", "마이페이지", "공지사항", "이용약관", "개인정보", "비밀번호", "글쓰기"]
+            if any(word in title for word in ignore_words):
+                continue
+            
             if not any(d['url'] == url for d in side_data):
                 side_data.append({
-                    'title': title,      # A열: 제목
-                    'subtitle': '',      # B열
-                    'url': url,          # C열: 링크
-                    'created_at': today_date, # D열
-                    'company': '',       # E열: (요청하신대로 빈칸)
-                    'status': 'archived', # F열: archived
-                    'publish': ''        # G열
+                    'title': title,
+                    'subtitle': '',
+                    'url': url,
+                    'created_at': today_date,
+                    'company': '',
+                    'status': 'archived',
+                    'publish': ''
                 })
+                # 로그에 찍어서 확인
+                if len(side_data) <= 3:
+                    print(f"   🆕 수집 후보: {title[:15]}... ({url})")
     except:
         continue
 
-print(f"✅ 수집된 데이터 후보: {len(side_data)}개")
+print(f"✅ 최종 수집 개수: {len(side_data)}개")
 
-# ▼▼▼ [중요] 데이터를 넣을 시트 주소를 입력하세요 ▼▼▼
-sheet_url = 'https://docs.google.com/spreadsheets/d/1nKPVCZ6zAOfpqCjV6WfjkzCI55FA9r2yvi9XL3iIneo/edit?gid=1818966683#gid=1818966683'
-
+# ▼▼▼ 시트 주소 확인 ▼▼▼
+sheet_url = '여기에_구글_시트_주소를_넣으세요'
 save_to_sheet(sheet_url, side_data)
 
 driver.quit()
