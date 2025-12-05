@@ -61,7 +61,7 @@ def save_to_sheet(sheet_url, new_data):
         print(f"[원티드] 저장 실패: {e}")
 
 # ==========================================
-# 2. 브라우저 설정 (Stealth)
+# 2. 브라우저 설정
 # ==========================================
 options = Options()
 options.add_argument('--headless')
@@ -82,36 +82,46 @@ stealth(driver,
 today_date = datetime.now().strftime('%Y-%m-%d')
 
 # ==========================================
-# 3. 원티드 크롤링 (합격보상금 제거)
+# 3. 원티드 크롤링 (태그 정밀 타격)
 # ==========================================
 print("▶ 원티드 수집 시작")
 driver.get("https://www.wanted.co.kr/wdlist/523/1635?country=kr&job_sort=job.popularity_order&years=-1&locations=all")
-time.sleep(10) # 안전 대기
+time.sleep(10)
 
 for _ in range(5):
     driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
     time.sleep(random.uniform(3, 5))
     
 wanted_data = []
+
+# 원티드 공고 카드(a 태그)들을 찾습니다.
 all_links = driver.find_elements(By.TAG_NAME, "a")
 articles = [link for link in all_links if link.get_attribute("href") and "/wd/" in link.get_attribute("href")]
 
 for article in articles:
     try:
         link = article.get_attribute("href")
-        raw_text = article.text.split('\n')
         
-        # [핵심] '합격보상금' 텍스트 제거 로직
-        clean_text = [line for line in raw_text if "합격보상금" not in line and line.strip() != ""]
-        
-        if len(clean_text) >= 2:
-            title = clean_text[0]
-            company = clean_text[1]
-            if len(title) > 2:
-                    wanted_data.append({
+        # [핵심 변경] 텍스트 전체를 자르는 게 아니라, HTML 태그를 콕 집어서 가져옵니다.
+        try:
+            # 1. 제목 찾기: 카드 안에서 가장 굵은 글씨(strong 태그)가 제목입니다.
+            title_tag = article.find_element(By.TAG_NAME, "strong")
+            title = title_tag.text.strip()
+            
+            # 2. 회사명 찾기: class 이름에 'company'가 들어가는 태그를 찾습니다.
+            company_tag = article.find_element(By.CSS_SELECTOR, "span[class*='company']")
+            company = company_tag.text.strip()
+            
+            # 유효성 검사
+            if title and company:
+                 wanted_data.append({
                     'title': title, 'subtitle': '', 'url': link, 
                     'created_at': today_date, 'company': company, 'status': 'active', 'publish': ''
                 })
+        except:
+            # 태그를 못 찾으면(광고 등) 건너뜀
+            continue
+            
     except: continue
 
 # ▼▼▼ [중요] 원티드 시트 주소 입력 ▼▼▼
