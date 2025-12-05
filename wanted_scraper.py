@@ -94,7 +94,6 @@ for _ in range(5):
     
 wanted_data = []
 
-# 원티드 공고 카드(a 태그)들을 찾습니다.
 all_links = driver.find_elements(By.TAG_NAME, "a")
 articles = [link for link in all_links if link.get_attribute("href") and "/wd/" in link.get_attribute("href")]
 
@@ -102,24 +101,26 @@ for article in articles:
     try:
         link = article.get_attribute("href")
         
-        # [핵심 변경] 텍스트 전체를 자르는 게 아니라, HTML 태그를 콕 집어서 가져옵니다.
         try:
-            # 1. 제목 찾기: 카드 안에서 가장 굵은 글씨(strong 태그)가 제목입니다.
+            # 1. 제목 찾기
             title_tag = article.find_element(By.TAG_NAME, "strong")
             title = title_tag.text.strip()
             
-            # 2. 회사명 찾기: class 이름에 'company'가 들어가는 태그를 찾습니다.
+            # 2. 회사명 찾기
             company_tag = article.find_element(By.CSS_SELECTOR, "span[class*='company']")
             company = company_tag.text.strip()
             
-            # 유효성 검사
             if title and company:
                  wanted_data.append({
-                    'title': title, 'subtitle': '', 'url': link, 
-                    'created_at': today_date, 'company': company, 'status': 'active', 'publish': ''
+                    'title': title, 
+                    'subtitle': '', 
+                    'url': link, 
+                    'created_at': today_date, 
+                    'company': company, 
+                    'status': 'archived', # [수정됨] active -> archived 변경
+                    'publish': ''
                 })
         except:
-            # 태그를 못 찾으면(광고 등) 건너뜀
             continue
             
     except: continue
