@@ -10,6 +10,8 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from datetime import datetime
 
 # ==========================================
@@ -59,28 +61,40 @@ def save_to_sheet(sheet_url, new_data):
         print(f"[사이드] 저장 실패: {e}")
 
 # ==========================================
-# 2. 브라우저 설정
+# 2. 브라우저 설정 (강화됨)
 # ==========================================
 options = Options()
 options.add_argument('--headless')
 options.add_argument('--no-sandbox')
 options.add_argument('--disable-dev-shm-usage')
-options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+# 최신 맥북 크롬으로 위장
+options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+options.add_argument("--window-size=1920,1080")
 
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 today_date = datetime.now().strftime('%Y-%m-%d')
 
 # ==========================================
-# 3. 사이드 프로젝트 수집 (필터링 대폭 완화)
+# 3. 사이드 프로젝트 수집 (대기 로직 추가)
 # ==========================================
 print("▶ 사이드 프로젝트 접속 중...")
 driver.get("https://sideproject.co.kr/projects")
-time.sleep(7) # 로딩 대기 시간 늘림
 
-# 스크롤 내려서 데이터 확보
+# [핵심] 데이터가 로딩될 때까지 최대 20초 기다림
+try:
+    WebDriverWait(driver, 20).until(
+        EC.presence_of_element_located((By.TAG_NAME, "a"))
+    )
+    print("✅ 사이트 로딩 성공!")
+except:
+    print("⚠️ 로딩 시간 초과 (그래도 진행해봅니다)")
+
+time.sleep(5)
+
+# 스크롤 3번 강하게 내리기
 for _ in range(3):
     driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-    time.sleep(2)
+    time.sleep(3)
 
 side_data = []
 all_links = driver.find_elements(By.TAG_NAME, "a")
@@ -92,15 +106,14 @@ for link in all_links:
         url = link.get_attribute("href")
         title = link.text.strip()
         
-        # [수정됨] URL 규칙 검사 삭제!
-        # 그냥 제목이 7글자 이상이고, 메뉴(로그인 등)가 아니면 무조건 수집
+        # 제목이 있고, 길이가 7자 이상인 것만
         if url and title and len(title) > 7:
-            
-            # 메뉴나 불필요한 링크 제외
+            # 제외 단어 필터링
             ignore_words = ["로그인", "회원가입", "마이페이지", "공지사항", "이용약관", "개인정보", "비밀번호", "글쓰기"]
             if any(word in title for word in ignore_words):
                 continue
             
+            # 리스트 중복 방지
             if not any(d['url'] == url for d in side_data):
                 side_data.append({
                     'title': title,
@@ -111,16 +124,13 @@ for link in all_links:
                     'status': 'archived',
                     'publish': ''
                 })
-                # 로그에 찍어서 확인
-                if len(side_data) <= 3:
-                    print(f"   🆕 수집 후보: {title[:15]}... ({url})")
     except:
         continue
 
 print(f"✅ 최종 수집 개수: {len(side_data)}개")
 
 # ▼▼▼ 시트 주소 확인 ▼▼▼
-sheet_url = '여기에_구글_시트_주소를_넣으세요'
+sheet_url = 'https://docs.google.com/spreadsheets/d/1nKPVCZ6zAOfpqCjV6WfjkzCI55FA9r2yvi9XL3iIneo/edit?gid=1818966683#gid=1818966683'
 save_to_sheet(sheet_url, side_data)
 
 driver.quit()
