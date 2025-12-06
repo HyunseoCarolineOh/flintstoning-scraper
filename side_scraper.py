@@ -10,6 +10,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # 1. 설정
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1nKPVCZ6zAOfpqCjV6WfjkzCI55FA9r2yvi9XL3iIneo/edit"
@@ -39,8 +41,11 @@ def get_driver():
     chrome_options.add_argument("--headless") 
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    # 화면 크기를 키워야 내용이 잘 보입니다 (중요)
     chrome_options.add_argument("--window-size=1920,1080")
+    
+    # [중요] 봇 탐지 방지를 위한 가짜 User-Agent 설정
+    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    chrome_options.add_argument(f'user-agent={user_agent}')
     
     driver = webdriver.Chrome(options=chrome_options)
     return driver
@@ -52,9 +57,17 @@ def get_projects():
 
     try:
         driver.get(SCRAPE_URL)
-        time.sleep(5) # 로딩 대기 시간을 3초 -> 5초로 늘림
+        
+        # [중요] 무작정 기다리는 게 아니라, 'a.post_link' 요소가 나올 때까지 최대 15초 대기
+        try:
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "a.post_link"))
+            )
+        except:
+            print("대기 시간 초과: 게시물을 찾을 수 없습니다. 페이지 소스를 확인합니다.")
+            print(driver.page_source[:500]) # 디버깅용: HTML 앞부분 출력
 
-        # 디버깅용: 몇 개나 찾았는지 로그 출력
+        # 게시물 찾기
         articles = driver.find_elements(By.CSS_SELECTOR, "a.post_link")
         print(f"웹사이트에서 발견한 게시물 수: {len(articles)}")
 
@@ -74,7 +87,6 @@ def get_projects():
                         'created_at': today
                     })
             except Exception as inner_e:
-                print(f"항목 처리 중 오류(무시함): {inner_e}")
                 continue
                 
     except Exception as e:
@@ -87,27 +99,22 @@ def get_projects():
 def update_sheet(worksheet, data):
     all_values = worksheet.get_all_values()
     
-    # 시트가 비어있을 경우 헤더 예외처리
-    if not all_values:
-        print("시트가 완전히 비어있습니다. 헤더를 추가해야 할 수도 있습니다.")
-        headers = []
+    if not all_values: # 시트가 비었을 때
+        headers = [] 
     else:
         headers = all_values[0]
     
-    # 헤더 위치 찾기
     try:
         idx_title = headers.index('title')
         idx_url = headers.index('url')
         idx_created_at = headers.index('created_at')
         idx_status = headers.index('status')
     except ValueError:
-        print("오류: 시트 1행에 title, url, created_at, status 헤더가 정확히 있어야 합니다.")
-        # 헤더가 없거나 틀리면 멈춤
+        print("오류: 시트 1행 헤더(title, url, created_at, status)를 찾을 수 없습니다.")
         return
 
     existing_urls = set()
     for row in all_values[1:]:
-        # URL 컬럼에 값이 있는 경우에만 수집
         if len(row) > idx_url:
             existing_urls.add(row[idx_url])
 
@@ -128,7 +135,7 @@ def update_sheet(worksheet, data):
         worksheet.append_rows(rows_to_append)
         print(f"{len(rows_to_append)}개 추가 완료.")
     else:
-        print("새로운 공고가 없습니다 (중복이거나 데이터를 못 찾음).")
+        print("새로운 공고가 없습니다 (이미 수집했거나 데이터를 못 찾음).")
 
 if __name__ == "__main__":
     try:
