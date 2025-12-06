@@ -71,38 +71,35 @@ def get_projects():
             try:
                 full_url = elem.get_attribute("href")
                 
-                # [수정됨] 텍스트 전체를 가져와서 분석
+                # 텍스트 전체 가져오기
                 raw_text = elem.text.strip()
                 
                 if not full_url or not raw_text:
                     continue
                 
                 # ----------------------------------------------------
-                # [핵심] 제목만 쏙 골라내는 로직
-                # 1. 줄바꿈(\n)을 기준으로 텍스트를 나눕니다.
+                # [제목 정제 로직]
                 lines = raw_text.split('\n')
                 
-                # 2. 'Ambassador', '·'(날짜 구분자) 등이 포함된 줄은 버립니다.
+                # 불필요한 줄 제거
                 cleaned_lines = [
                     line.strip() for line in lines 
-                    if "Ambassador" not in line       # 앰배서더 태그 제외
-                    and "·" not in line               # 날짜/작성자 제외 (예: 믹스 · 1주전)
-                    and len(line.strip()) > 0         # 빈 줄 제외
+                    if "Ambassador" not in line       
+                    and "·" not in line               
+                    and len(line.strip()) > 0         
                 ]
                 
-                # 3. 남은 줄 중에서 '가장 긴 줄'을 제목으로 선택합니다.
-                # (보통 제목이 태그나 짧은 단어보다 깁니다)
+                # 가장 긴 줄을 제목으로 선택
                 if cleaned_lines:
                     title = max(cleaned_lines, key=len)
                 else:
-                    title = raw_text # 정제 실패 시 원본 사용
+                    title = raw_text 
                 # ----------------------------------------------------
 
-                # 필터링: 제목이 10글자 이상이고, http 링크인 경우만
+                # 필터링: 제목 길이 10 이상, http 링크 포함
                 if len(title) > 10 and "http" in full_url:
                     
                     if not any(d['url'] == full_url for d in new_data):
-                        # 메뉴 등 제외
                         if "로그인" in title or "회원가입" in title:
                             continue
 
@@ -153,7 +150,10 @@ def update_sheet(worksheet, data):
         new_row[idx_title] = item['title']
         new_row[idx_url] = item['url']
         new_row[idx_created_at] = item['created_at']
-        new_row[idx_status] = 'new'
+        
+        # [수정됨] 무조건 'archived'로 저장
+        new_row[idx_status] = 'archived'
+        
         rows_to_append.append(new_row)
 
     if rows_to_append:
