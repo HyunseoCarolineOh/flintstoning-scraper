@@ -6,3 +6,5 @@ webdriver-manager
 selenium-stealth
 google-auth
 oauth2client
+requests
+beautifulsoup4
