@@ -16,7 +16,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # 1. 설정
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1nKPVCZ6zAOfpqCjV6WfjkzCI55FA9r2yvi9XL3iIneo/edit"
 
-# ▼ 방금 주신 'Wanted' 탭의 고유 번호
+# ▼ 원티드 탭 GID (확인 필수)
 TARGET_GID = 639559541
 SCRAPE_URL = "https://www.wanted.co.kr/wdlist/523/1635?country=kr&job_sort=job.popularity_order&years=-1&locations=all"
 
@@ -29,7 +29,6 @@ def get_google_sheet():
     spreadsheet = client.open_by_url(SHEET_URL)
     worksheet = None
     
-    # GID로 시트 찾기
     for sheet in spreadsheet.worksheets():
         if str(sheet.id) == str(TARGET_GID):
             worksheet = sheet
@@ -86,14 +85,32 @@ def get_projects():
                 raw_text = elem.text.strip()
                 if not raw_text: continue
 
-                # [원티드 제목 정제 로직]
+                # [수정된 제목 추출 로직]
                 lines = raw_text.split('\n')
-                cleaned_lines = [line.strip() for line in lines if line.strip()]
+                
+                # 필터링: 보상금, 응답률 등 불필요한 정보가 섞인 줄 제거
+                cleaned_lines = []
+                for line in lines:
+                    text = line.strip()
+                    if not text: continue
+                    
+                    # 1. '합격보상금'이나 '만원' 같은 돈 관련 단어 제거
+                    if "합격보상금" in text or "보상금" in text:
+                        continue
+                    # 2. 숫자로만 되어있거나 '원'으로 끝나는 금액 제거 (예: 1,000,000원)
+                    if text.endswith("원") and any(c.isdigit() for c in text):
+                        continue
+                    # 3. '응답률 높음' 같은 뱃지 제거
+                    if "응답률" in text or "입사축하금" in text:
+                        continue
+                        
+                    cleaned_lines.append(text)
                 
                 if not cleaned_lines:
                     continue
                     
-                # 첫 번째 줄을 제목으로 사용
+                # 필터링 후 남은 첫 번째 줄을 진짜 제목으로 간주
+                # (보통 제목이 회사이름보다 먼저 나오거나, 가장 위에 있음)
                 title = cleaned_lines[0]
                 
                 idx_match = re.search(r'/wd/(\d+)', full_url)
@@ -147,7 +164,7 @@ def update_sheet(worksheet, data):
         new_row[idx_title] = item['title']
         new_row[idx_url] = item['url']
         new_row[idx_created_at] = item['created_at']
-        new_row[idx_status] = 'archived' # 원티드도 archived 고정
+        new_row[idx_status] = 'archived'
         rows_to_append.append(new_row)
 
     if rows_to_append:
