@@ -1,4 +1,4 @@
-name: Wanted Scraper (원티드)
+name: Wanted Scraper Run
 
 on:
   schedule:
