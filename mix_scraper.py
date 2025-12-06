@@ -15,8 +15,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 # 1. 설정
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1nKPVCZ6zAOfpqCjV6WfjkzCI55FA9r2yvi9XL3iIneo/edit"
-# ▼ 방금 알려주신 'Mix' 탭의 고유 번호
-TARGET_GID = 981623942 
+TARGET_GID = 981623942  # Mix 탭 GID
 SCRAPE_URL = "https://mix.day/"
 
 def get_google_sheet():
@@ -28,14 +27,13 @@ def get_google_sheet():
     spreadsheet = client.open_by_url(SHEET_URL)
     worksheet = None
     
-    # GID로 시트 찾기
     for sheet in spreadsheet.worksheets():
         if str(sheet.id) == str(TARGET_GID):
             worksheet = sheet
             break
             
     if worksheet is None:
-        raise Exception(f"GID가 {TARGET_GID}인 시트를 찾을 수 없습니다. 시트 탭이 존재하는지 확인하세요.")
+        raise Exception(f"GID가 {TARGET_GID}인 시트를 찾을 수 없습니다.")
     
     print(f"📂 연결된 시트: {worksheet.title}")
     return worksheet
@@ -63,29 +61,49 @@ def get_projects():
         print("🌐 Mix.day 접속 중...")
         driver.get(SCRAPE_URL)
         
-        # 화면 로딩 대기 (10초)
+        # 화면 로딩 대기
         time.sleep(10)
         
-        # 모든 링크(a 태그) 수집
         elements = driver.find_elements(By.TAG_NAME, "a")
         print(f"🔍 페이지 내 전체 링크 수: {len(elements)}개")
 
         for elem in elements:
             try:
                 full_url = elem.get_attribute("href")
-                title = elem.text.strip()
                 
-                if not full_url or not title:
+                # [수정됨] 텍스트 전체를 가져와서 분석
+                raw_text = elem.text.strip()
+                
+                if not full_url or not raw_text:
                     continue
                 
-                # [Mix.day 수집 규칙]
-                # 제목이 10글자 이상이고, http 링크인 경우 유효한 게시물로 판단
+                # ----------------------------------------------------
+                # [핵심] 제목만 쏙 골라내는 로직
+                # 1. 줄바꿈(\n)을 기준으로 텍스트를 나눕니다.
+                lines = raw_text.split('\n')
+                
+                # 2. 'Ambassador', '·'(날짜 구분자) 등이 포함된 줄은 버립니다.
+                cleaned_lines = [
+                    line.strip() for line in lines 
+                    if "Ambassador" not in line       # 앰배서더 태그 제외
+                    and "·" not in line               # 날짜/작성자 제외 (예: 믹스 · 1주전)
+                    and len(line.strip()) > 0         # 빈 줄 제외
+                ]
+                
+                # 3. 남은 줄 중에서 '가장 긴 줄'을 제목으로 선택합니다.
+                # (보통 제목이 태그나 짧은 단어보다 깁니다)
+                if cleaned_lines:
+                    title = max(cleaned_lines, key=len)
+                else:
+                    title = raw_text # 정제 실패 시 원본 사용
+                # ----------------------------------------------------
+
+                # 필터링: 제목이 10글자 이상이고, http 링크인 경우만
                 if len(title) > 10 and "http" in full_url:
                     
-                    # 중복 방지
                     if not any(d['url'] == full_url for d in new_data):
-                        # 제외할 키워드
-                        if "로그인" in title or "회원가입" in title or "비밀번호" in title:
+                        # 메뉴 등 제외
+                        if "로그인" in title or "회원가입" in title:
                             continue
 
                         new_data.append({
@@ -101,13 +119,12 @@ def get_projects():
     finally:
         driver.quit()
             
-    print(f"🎯 수집된 게시물: {len(new_data)}개")
+    print(f"🎯 정제된 게시물: {len(new_data)}개")
     return new_data
 
 def update_sheet(worksheet, data):
     all_values = worksheet.get_all_values()
     
-    # 시트가 비어있으면 헤더가 없는 것으로 간주
     if not all_values:
         headers = []
     else:
@@ -119,7 +136,7 @@ def update_sheet(worksheet, data):
         idx_created_at = headers.index('created_at')
         idx_status = headers.index('status')
     except ValueError:
-        print("⛔ 헤더 오류: 새 시트 1행에 title, url, created_at, status 헤더를 꼭 적어주세요!")
+        print("⛔ 헤더 오류: 시트 1행에 title, url, created_at, status 가 있어야 합니다.")
         return
 
     existing_urls = set()
