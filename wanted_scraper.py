@@ -15,8 +15,9 @@ from selenium.webdriver.support import expected_conditions as EC
 
 # 1. 설정
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1nKPVCZ6zAOfpqCjV6WfjkzCI55FA9r2yvi9XL3iIneo/edit"
+
 # ▼ 원티드 탭 GID (확인 필수)
-TARGET_GID = 639559541 
+TARGET_GID = 639559541
 SCRAPE_URL = "https://www.wanted.co.kr/wdlist/523/1635?country=kr&job_sort=job.popularity_order&years=-1&locations=all"
 
 def get_google_sheet():
@@ -61,52 +62,66 @@ def get_projects():
         print("🌐 원티드(Wanted) 접속 중...")
         driver.get(SCRAPE_URL)
         
+        # 화면 로딩 대기
         time.sleep(5)
+        
+        # 스크롤을 살짝 내려서 데이터를 더 불러옵니다
         driver.execute_script("window.scrollTo(0, 1000);")
         time.sleep(3)
         
+        # 모든 링크(a 태그) 수집
         elements = driver.find_elements(By.TAG_NAME, "a")
         print(f"🔍 페이지 내 전체 링크 수: {len(elements)}개")
 
         for elem in elements:
             try:
                 full_url = elem.get_attribute("href")
+                
+                # 원티드 채용 공고 링크 패턴: /wd/숫자
                 if not full_url or "/wd/" not in full_url:
                     continue
                 
+                # 텍스트 가져오기
                 raw_text = elem.text.strip()
                 if not raw_text: continue
 
-                # [텍스트 분석]
+                # [수정된 제목 추출 로직]
                 lines = raw_text.split('\n')
                 
-                # 1. 불필요한 정보(보상금, 뱃지 등) 제거
-                safe_lines = []
+                # 필터링: 보상금, 응답률 등 불필요한 정보가 섞인 줄 제거
+                cleaned_lines = []
                 for line in lines:
                     text = line.strip()
                     if not text: continue
                     
-                    if "합격보상금" in text or "보상금" in text: continue
-                    if text.endswith("원") and any(c.isdigit() for c in text): continue 
-                    if "응답률" in text or "입사축하금" in text: continue
-                    
-                    safe_lines.append(text)
-                
-                # 2. 남은 줄 분석 (제목, 회사명 추출)
-                if len(safe_lines) >= 2:
-                    title = safe_lines[0]    # 첫 번째 줄 = 제목
-                    company = safe_lines[1]  # 두 번째 줄 = 회사명
-                    
-                    idx_match = re.search(r'/wd/(\d+)', full_url)
-                    if len(title) > 2 and idx_match:
+                    # 1. '합격보상금'이나 '만원' 같은 돈 관련 단어 제거
+                    if "합격보상금" in text or "보상금" in text:
+                        continue
+                    # 2. 숫자로만 되어있거나 '원'으로 끝나는 금액 제거 (예: 1,000,000원)
+                    if text.endswith("원") and any(c.isdigit() for c in text):
+                        continue
+                    # 3. '응답률 높음' 같은 뱃지 제거
+                    if "응답률" in text or "입사축하금" in text:
+                        continue
                         
-                        if not any(d['url'] == full_url for d in new_data):
-                            new_data.append({
-                                'title': title,
-                                'company': company,
-                                'url': full_url,
-                                'created_at': today
-                            })
+                    cleaned_lines.append(text)
+                
+                if not cleaned_lines:
+                    continue
+                    
+                # 필터링 후 남은 첫 번째 줄을 진짜 제목으로 간주
+                # (보통 제목이 회사이름보다 먼저 나오거나, 가장 위에 있음)
+                title = cleaned_lines[0]
+                
+                idx_match = re.search(r'/wd/(\d+)', full_url)
+                if len(title) > 2 and idx_match:
+                    
+                    if not any(d['url'] == full_url for d in new_data):
+                        new_data.append({
+                            'title': title,
+                            'url': full_url,
+                            'created_at': today
+                        })
             except:
                 continue
                 
@@ -127,16 +142,41 @@ def update_sheet(worksheet, data):
         headers = all_values[0]
 
     try:
-        # [중요] 1행 헤더 이름을 보고 위치를 자동으로 찾습니다.
-        # F1 셀에 'company'라고 적혀있으면 idx_company는 자동으로 5(F열)가 됩니다.
         idx_title = headers.index('title')
         idx_url = headers.index('url')
         idx_created_at = headers.index('created_at')
         idx_status = headers.index('status')
-        idx_company = headers.index('company') 
     except ValueError:
-        print("⛔ 헤더 오류: 시트 1행에 title, url, created_at, status, company 가 모두 있어야 합니다.")
+        print("⛔ 헤더 오류: 시트 1행에 title, url, created_at, status 가 있어야 합니다.")
         return
 
     existing_urls = set()
     for row in all_values[1:]:
+        if len(row) > idx_url:
+            existing_urls.add(row[idx_url])
+
+    rows_to_append = []
+    for item in data:
+        if item['url'] in existing_urls:
+            continue
+            
+        new_row = [''] * len(headers)
+        new_row[idx_title] = item['title']
+        new_row[idx_url] = item['url']
+        new_row[idx_created_at] = item['created_at']
+        new_row[idx_status] = 'archived'
+        rows_to_append.append(new_row)
+
+    if rows_to_append:
+        worksheet.append_rows(rows_to_append)
+        print(f"💾 {len(rows_to_append)}개 저장 완료!")
+    else:
+        print("ℹ️ 새로운 공고가 없습니다.")
+
+if __name__ == "__main__":
+    try:
+        sheet = get_google_sheet()
+        projects = get_projects()
+        update_sheet(sheet, projects)
+    except Exception as e:
+        print(f"🚨 실행 실패: {e}")
