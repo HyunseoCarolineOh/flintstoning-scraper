@@ -7,7 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # --- 환경 변수 로드 ---
-GOOGLE_JSON = json.loads(os.environ['GOOGLE_SHEET_KEY'])
+GOOGLE_JSON = json.loads(os.environ['GOOGLE_CREDENTIALS'])
 GEMINI_API_KEY = os.environ['GEMINI_API_KEY']
 SHEET_URL = os.environ['SHEET_URL']
 # SLACK_WEBHOOK_URL은 당분간 사용하지 않으므로 주석 처리하거나 환경 변수에서 제외해도 됩니다.
