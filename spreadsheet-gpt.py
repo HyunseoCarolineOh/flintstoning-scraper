@@ -1,21 +1,26 @@
 import os
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from openai import OpenAI
+import google.generativeai as genai
 
 # -----------------------------
-# 1) 환경변수 & 기본 설정
+# 1) 기본 설정
 # -----------------------------
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# ✅ Secret에는 GEMINI_API_KEY만 저장
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# ✅ 시트 정보는 코드에 하드코딩
+SPREADSHEET_ID = "1nKPVCZ6zAOfpqCjV6WfjkzCI55FA9r2yvi9XL3iIneo"
+SHEET_NAME = "사이드"
+
 SERVICE_ACCOUNT_FILE = "service_account.json"
-SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
-SHEET_NAME = os.getenv("SHEET_NAME", "사이드")  # 기본값: '사이드'
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Gemini 설정
+genai.configure(api_key=GEMINI_API_KEY)
+MODEL_NAME = "gemini-1.5-flash"
 
 # -----------------------------
 # 2) 출력 형식 정의
-#    - 여기만 수정하면 원하는 포맷으로 바뀜
 # -----------------------------
 FORMAT_INSTRUCTIONS = """
 다음 정보를 바탕으로, 사이드 프로젝트/채용/커뮤니티 정보를 공유하는 짧은 소개 문구를 한국어로 작성해 주세요.
@@ -55,7 +60,7 @@ def read_sheet():
     return result.get("values", [])
 
 # -----------------------------
-# 5) OpenAI 호출
+# 5) Gemini 호출
 # -----------------------------
 def generate_output(title, subtitle, url, created_at, company):
     base_info = f"""
@@ -78,18 +83,15 @@ URL: {url}
 {FORMAT_INSTRUCTIONS}
 """
 
-    completion = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": "You write concise Korean copy for sharing interesting opportunities in a fixed format.",
-            },
-            {"role": "user", "content": prompt},
-        ],
-    )
+    model = genai.GenerativeModel(MODEL_NAME)
+    response = model.generate_content(prompt)
 
-    return completion.choices[0].message.content.strip()
+    # 응답에서 텍스트만 추출
+    try:
+        return response.text.strip()
+    except Exception as e:
+        print("Gemini 응답 파싱 에러:", e)
+        return "ERROR: Gemini 응답을 파싱하지 못했습니다."
 
 # -----------------------------
 # 6) 시트 업데이트
