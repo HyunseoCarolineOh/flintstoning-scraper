@@ -94,7 +94,7 @@ def get_projects():
                             new_data.append({
                                 'title': title,
                                 'url': full_url,
-                                'created_at': today
+                                'archived_at': today
                             })
             except:
                 continue
@@ -133,10 +133,10 @@ def update_sheet(worksheet, data):
     try:
         idx_title = headers.index('title')
         idx_url = headers.index('url')
-        idx_created_at = headers.index('created_at')
+        idx_archived_at = headers.index('archived_at')
         idx_status = headers.index('status')
     except ValueError:
-        print("⛔ 헤더 오류: 1행에 title, url, created_at, status 가 정확히 있어야 합니다.")
+        print("⛔ 헤더 오류: 1행에 title, url, archived_at, status 가 정확히 있어야 합니다.")
         return
 
     existing_urls = set()
@@ -152,7 +152,7 @@ def update_sheet(worksheet, data):
         new_row = [''] * len(headers)
         new_row[idx_title] = item['title']
         new_row[idx_url] = item['url']
-        new_row[idx_created_at] = item['created_at']
+        new_row[idx_archived_at] = item['archived_at']
         new_row[idx_status] = 'archived'
         rows_to_append.append(new_row)
 
