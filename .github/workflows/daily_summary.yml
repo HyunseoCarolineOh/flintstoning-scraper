@@ -24,8 +24,7 @@ jobs:
 
       - name: Run Spreadsheet GPT
         env:
-          GOOGLE_SHEET_KEY: ${{ secrets.GOOGLE_SHEET_KEY }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }} 
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           SHEET_URL: ${{ secrets.SHEET_URL }}
         run: python spreadsheet-gpt.py
