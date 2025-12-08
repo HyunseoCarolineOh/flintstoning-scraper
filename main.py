@@ -149,17 +149,47 @@ try:
         ]
     )
 
+    # ... (위쪽 GPT 요약 코드는 그대로 유지) ...
+
     # 결과 받기
     summary = completion.choices[0].message.content
     
-    # [수정됨] 링크 부분도 요청하신 불릿 포인트 서식(- 🔗)에 맞춤
-    final_message = f"{summary}\n\n🔗 **원문 보러 가기**: {target_url}"
+    # 링크 부분 포맷팅
+    final_message = f"{summary}\n\n- 🔗 **원문 보러 가기**: {target_url}"
     
+    # 1. 로그창에 출력 (확인용)
     print("\n" + "="*30)
     print(" [최종 결과물] ")
     print("="*30)
     print(final_message)
     print("="*30)
+
+    # =========================================================
+    # PART 5. [완전 신규 기능] 슬랙(Slack)으로 전송하기
+    # =========================================================
+    print("\n--- [NEW] 슬랙 전송 시작 ---")
+    
+    try:
+        webhook_url = os.environ['SLACK_WEBHOOK_URL']
+        
+        # 슬랙으로 보낼 데이터 (JSON 형식)
+        payload = {
+            "text": final_message
+        }
+        
+        # 전송 (requests 라이브러리 사용)
+        response = requests.post(webhook_url, json=payload)
+        
+        if response.status_code == 200:
+            print("✅ 슬랙 전송 성공!")
+        else:
+            print(f"❌ 전송 실패 (상태 코드: {response.status_code})")
+            print(response.text)
+            
+    except KeyError:
+        print("⚠️ 경고: SLACK_WEBHOOK_URL 시크릿이 설정되지 않아서 전송을 건너뜁니다.")
+    except Exception as e:
+        print(f"❌ 슬랙 전송 중 에러 발생: {e}")
 
 except Exception as e:
     print(f"\n❌ 에러 발생: {e}")
