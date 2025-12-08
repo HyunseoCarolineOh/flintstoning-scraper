@@ -149,7 +149,7 @@ try:
     print("--- GPT 응답 완료 ---")
 
     # 링크 추가
-    final_message_with_link = f"{final_message}\n\n <{target_url}|공고 바로가기>"
+    final_message_with_link = f"{final_message}\n\n 🔗 <{target_url}|공고 바로가기>"
 
     print("--- 최종 전송 메시지 ---")
     print(final_message_with_link)
