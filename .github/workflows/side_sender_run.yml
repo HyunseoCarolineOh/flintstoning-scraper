@@ -3,7 +3,9 @@ name: Side Sender Run
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 11 * * *'
+    # 매일 저녁 9시 (UTC 12:00)
+    - cron: '0 12 * * *'
+
 
 jobs:
   run-filter:
