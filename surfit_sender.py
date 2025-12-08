@@ -14,7 +14,11 @@ import time
 try:
     print("--- [Insight Sender] 시작 ---")
 
-    json_creds = os.environ['GOOGLE_CREDENTIALS']
+    # 환경변수에서 키 로드 (보안 유지)
+    json_creds = os.environ.get('GOOGLE_CREDENTIALS')
+    if not json_creds:
+        raise ValueError("❌ GOOGLE_CREDENTIALS 환경 변수가 설정되지 않았습니다.")
+        
     creds_dict = json.loads(json_creds)
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
@@ -22,9 +26,7 @@ try:
 
     # 시트 열기
     spreadsheet = client.open('플린트스토닝 소재 DB')
-    
-    # [체크] 두 번째 탭(Sheet2) 선택
-    sheet = spreadsheet.get_worksheet(1) 
+    sheet = spreadsheet.get_worksheet(1) # 두 번째 탭
 
     # 데이터 가져오기
     data = sheet.get_all_values()
@@ -36,53 +38,10 @@ try:
     df = pd.DataFrame(data, columns=headers)
 
     # =========================================================
-    # 2. 필터링 (F열: archived, publish: TRUE)
+    # 2. 필터링 로직 개선 (헤더 이름 사용 권장)
     # =========================================================
     
-    # [안전 장치] 최소 열 개수 확인
-    if len(df.columns) < 6:
-        print("❌ 열 개수가 부족합니다 (최소 6열 필요).")
-        exit()
-
-    col_status = df.columns[5] # F열 (0부터 시작하므로 인덱스 5)
-    
-    # 조건 확인 (archived & TRUE)
-    # 대소문자나 공백 실수를 방지하기 위해 strip() 사용
-    condition = (df[col_status].str.strip() == 'archived') & (df['publish'].str.strip() == 'TRUE')
-    target_rows = df[condition]
-
-    if target_rows.empty:
-        print("ℹ️ 발송할 대상(archived & publish=TRUE)이 없습니다.")
-        exit()
-
-    # 첫 번째 행 선택
-    row = target_rows.iloc[0]
-    
-    # 행 번호 계산 (헤더 1줄 + 0-based index 보정 = +2)
-    update_row_index = row.name + 2
-    
-    print(f"▶ 선택된 행 번호: {update_row_index}")
-
-    # =========================================================
-    # 3. 데이터 추출 (A열: 제목, C열: URL)
-    # =========================================================
-    
-    # [수정] A열(인덱스 0) -> 제목
-    article_title = row.iloc[0]
-    
-    # [수정] C열(인덱스 2) -> URL
-    target_url = row.iloc[2]
-
-    # URL 유효성 간단 체크
-    if not target_url or not target_url.startswith('http'):
-        print(f"❌ URL 형식이 올바르지 않습니다: {target_url}")
-        exit()
-
-    print(f"▶ 제목: {article_title}")
-    print(f"▶ URL: {target_url}")
-
-    # =========================================================
-    # 4. 웹 스크래핑
-    # =========================================================
-    print("--- 스크래핑 시작 ---")
-    headers_ua = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML
+    # [설정] 실제 시트의 헤더 이름과 정확히 일치해야 합니다.
+    # 만약 헤더 이름이 자주 바뀐다면 기존처럼 인덱스를 써야 하지만, 
+    # 아래처럼 변수로 관리하는 것이 유지보수에 좋습니다.
+    COL_TITLE = headers[0]    # A열 (보통 'Title' 또는 '제목')
