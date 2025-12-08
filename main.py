@@ -18,7 +18,7 @@ client = gspread.authorize(creds)
 
 # 3. 스프레드시트 열기
 # '구글_스프레드시트_제목'을 본인의 실제 시트 제목으로 바꿔주세요.
-spreadsheet = client.open('구글_스프레드시트_제목')
+spreadsheet = client.open('플린트스토닝 소재 DB')
 sheet = spreadsheet.sheet1
 
 # 4. 데이터 가져오기
