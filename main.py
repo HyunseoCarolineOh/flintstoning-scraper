@@ -3,17 +3,13 @@ import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
-
-# ==========================================
-# [NEW] 새로 추가된 라이브러리 (인터넷 접속 + GPT)
-# ==========================================
 import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
 
 
 # =========================================================
-# PART 1. [기존 기능] 구글 시트 연결 및 데이터 가져오기
+# PART 1. 구글 시트 연결 및 데이터 가져오기
 # =========================================================
 try:
     # 1. 인증 설정 (깃허브 시크릿 사용)
@@ -24,7 +20,6 @@ try:
     client = gspread.authorize(creds)
 
     # 2. 시트 열기
-    # ★ [체크] 본인의 시트 제목으로 수정되어 있는지 확인하세요
     spreadsheet = client.open('플린트스토닝 소재 DB') 
     sheet = spreadsheet.sheet1
 
@@ -38,7 +33,7 @@ try:
     df = pd.DataFrame(data, columns=headers)
 
     # =========================================================
-    # PART 2. [기존 기능 + 업그레이드] 조건 필터링
+    # PART 2. 조건 필터링
     # =========================================================
     
     # 열 개수 확인
@@ -64,11 +59,9 @@ try:
 
 
     # =========================================================
-    # PART 3. [완전 신규 기능] url 접속 및 내용 긁어오기 (Scraping)
+    # PART 3. url 접속 및 내용 긁어오기 (Scraping)
     # =========================================================
     print("\n--- [NEW] url 내용 추출 시작 ---")
-
-    # ★ [체크] 엑셀의 url 컬럼 이름이 'url'이 맞는지 확인하세요 (다르면 수정!)
     url_col_name = 'url' 
 
     if url_col_name not in row:
@@ -104,34 +97,29 @@ try:
 
 
    # =========================================================
-    # PART 4. [완전 신규 기능] GPT에게 요약 시키기
+    # PART 4. GPT에게 요약 시키기
     # =========================================================
     print("\n--- [NEW] GPT 요약 요청 시작 ---")
 
+    # ★ 스프레드시트에서 제목 가져오기
+    title_col_name = 'title' 
+
+    if title_col_name not in row:
+        print(f"오류: 엑셀에 '{title_col_name}'이라는 헤더가 없습니다.")
+        exit()
+    
+    project_title = row[title_col_name]
+    print(f"▶ 제목 추출 완료: {project_title}")
+
     client_openai = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
 
-    # [수정됨] 
-    # 1. 볼드체: ** 대신 * 사용 (슬랙 문법)
-    # 2. 링크: 파이썬의 target_url을 프롬프트에 주입하여 <URL|제목> 형태로 출력 유도
-    # 3. 스타일: 이모지 제거, 세부 내용은 줄글(Paragraph) 형태
-    
+    # 프롬프트
     gpt_prompt = f"""
     너는 채용 공고나 프로젝트 정보를 정리해주는 '전문 에디터'야.
     아래 [글 내용]을 읽고, 지정된 **출력 양식**을 엄격하게 지켜서 답변해.
-
-    [제약 사항]
-    1. **이모지 금지**: 모든 텍스트에 이모지를 절대 사용하지 마.
-    2. **볼드 처리**: 강조하고 싶은 단어는 **(더블) 대신 *(싱글) 별표를 사용해. (예: *강조*)
-    3. **세부 내용**: 개조식(불릿)이 아니라, 담당자가 옆에서 말해주는 것처럼 자연스러운 '줄글(문단)'로 작성해.
-    4. **제목 링크**: 제목 부분은 반드시 <{target_url}|원래 공고 제목> 형식을 지켜야 해.
+    모든 텍스트에 이모지를 절대 사용하지 마.
 
     [출력 양식]
-    *추천 프로젝트*
-    <{target_url}|(글에 적힌 원본 제목 그대로 작성)>
-
-    *세부 내용*
-    (이 부분은 사람이 대화하듯이 자연스러운 줄글로 작성. "~~해요", "~~입니다" 체 사용.)
-
     *이런 분께 추천해요*
     - (추천 대상 1)
     - (추천 대상 2)
@@ -149,10 +137,14 @@ try:
         ]
     )
 
-    # 결과 받기
-    final_message = completion.choices[0].message.content
+    # GPT 결과 (추천대상)
+    gpt_body = completion.choices[0].message.content
     
-    # 1. 로그창에 출력 (확인용)
+    # 파이썬이 직접 '제목(링크)'와 'GPT요약'을 합체!
+    # 슬랙 링크 형식: <URL|텍스트>
+    final_message = f"*추천 프로젝트*\n<{target_url}|{project_title}>\n\n{gpt_body}"
+    
+    # 로그 출력
     print("\n" + "="*30)
     print(" [최종 결과물] ")
     print("="*30)
@@ -160,19 +152,17 @@ try:
     print("="*30)
 
     # =========================================================
-    # PART 5. [완전 신규 기능] 슬랙(Slack)으로 전송하기
+    # PART 5. 슬랙(Slack)으로 전송하기
     # =========================================================
     print("\n--- [NEW] 슬랙 전송 시작 ---")
     
     try:
         webhook_url = os.environ['SLACK_WEBHOOK_URL']
         
-        # 슬랙으로 보낼 데이터 (JSON 형식)
         payload = {
             "text": final_message
         }
         
-        # 전송 (requests 라이브러리 사용)
         response = requests.post(webhook_url, json=payload)
         
         if response.status_code == 200:
