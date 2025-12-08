@@ -1,4 +1,4 @@
-name: 엑셀 필터링 실행
+name: 엑셀 필터링 및 요약 실행
 
 on:
   workflow_dispatch:
@@ -20,8 +20,8 @@ jobs:
       run: |
         pip install -r requirements.txt
 
-    # [수정된 부분] 시크릿 이름을 GOOGLE_CREDENTIALS로 변경
     - name: 파이썬 스크립트 실행
       env:
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: python main.py
