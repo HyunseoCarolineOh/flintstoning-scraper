@@ -96,60 +96,50 @@ try:
     print("--- GPT 요약 요청 ---")
     client_openai = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
 
+    # [수정] 출력 양식을 엄격하게 지정한 프롬프트
     gpt_prompt = f"""
-    너는 채용 정보를 분석하는 AI야. 아래 [채용 정보]를 보고 회사명과 요약을 추출해.
-    
-    [중요 지침]
-    1. **회사 이름 찾기 규칙**:
-       - 가장 중요한 힌트는 **제목(Title)**에 있어.
-       - 제목에 `[회사명]` 혹은 `[팀명]` 처럼 대괄호가 있다면 그 안의 단어를 회사명으로 추출해.
-       - 예시: "[인턴] [노트폴리오] 마케팅 담당자" -> Company: 노트폴리오
-       - 만약 제목에 회사명이 없다면 본문에서 찾아.
-       
-    2. **함정 피하기**:
-       - 본문에 "(주)원티드랩은 서울 송파구에..." 같은 문구는 채용 플랫폼의 설명일 뿐이야. **이것을 회사명으로 적지 마.** (단, 제목 자체가 원티드랩 채용인 경우는 제외)
+    너는 채용 공고를 분석해서 슬랙(Slack) 메시지로 보내기 좋은 형태로 바꿔주는 봇이야.
+    아래 [채용 정보]를 읽고, **출력 예시**와 똑같은 포맷으로 답변해.
 
-    3. **출력 양식**:
-       Company: (회사명)
-       (여기서부터 요약 내용 작성)
+    [출력 예시]
+    *추천 채용 공고*
+    [회사명] 공고 제목
+
+    여기에 요약 내용을 2~3문장으로 자연스럽게 작성해. 해요체(~합니다)를 사용해.
+    
+    -
+
+    [작성 규칙]
+    1. 첫 줄은 무조건 `*추천 채용 공고*`로 고정해.
+    2. 두 번째 줄은 `[회사명] 공고 제목` 형태로 작성해. (제목에 이미 [회사명]이 있다면 그대로 써)
+    3. 요약문 아래에 빈 줄을 하나 넣고, 맨 마지막 줄에는 하이픈(-) 하나만 딱 넣어줘.
+    4. 불필요한 설명(예: "요약 내용입니다")은 절대 넣지 마.
 
     [채용 정보]
     제목: {project_title}
     본문: {truncated_text}
     """
 
-    # (이후 호출 코드는 동일)
+    # ... (위의 gpt_prompt 선언 이후) ...
+
     completion = client_openai.chat.completions.create(
-        model="gpt-3.5-turbo", # 또는 gpt-4o-mini 추천 (더 똑똑하고 저렴함)
+        model="gpt-3.5-turbo",
         messages=[
             {"role": "system", "content": "You are a helpful HR assistant."},
             {"role": "user", "content": gpt_prompt}
         ]
     )
 
-    full_response = completion.choices[0].message.content
+    # [수정] GPT가 준 답변을 그대로 결과물로 사용 (복잡한 가공 로직 삭제)
+    final_message = completion.choices[0].message.content.strip()
     
-    # [핵심] 첫 줄(회사명)과 나머지(본문) 분리하기
-    lines = full_response.strip().split('\n')
-    
-    # 첫 줄에서 회사명 추출 ('Company:' 제거)
-    first_line = lines[0]
-    if first_line.startswith("Company:"):
-        company_name = first_line.replace("Company:", "").strip()
-        # 나머지 줄들을 다시 합쳐서 본문으로 만듦
-        gpt_body = "\n".join(lines[1:]).strip()
-    else:
-        # 만약 GPT가 형식을 안 지켰을 경우 대비
-        company_name = "채용"
-        gpt_body = full_response
-
-    print(f"▶ GPT가 찾은 회사명: {company_name}")
-
-    # 메시지 조립
-    final_message = f"*[{company_name}] 채용 공고*\n<{target_url}|{project_title}>\n\n{gpt_body}"
+    # [선택] 만약 링크를 두 번째 줄에 걸고 싶다면, 파이썬에서 문자열을 살짝 수정해야 함
+    # 하지만 단순히 텍스트만 원하신다면 위 final_message를 그대로 쓰시면 됩니다.
     
     print("--- 최종 결과물 ---")
     print(final_message)
+    
+    # (이후 슬랙 전송 코드 등...)
 
     # =========================================================
     # 6. 슬랙 전송 & 시트 업데이트 (published 처리)
