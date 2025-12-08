@@ -1,28 +1,44 @@
+import os
+import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 
-# 1. 인증 설정 (같은 폴더에 있는 credentials.json을 찾음)
+# 1. 환경변수에서 시크릿 가져오기 (파일을 읽는 게 아니라, 깃허브 금고를 엽니다)
+# 주의: 깃허브 Secret 이름을 'GOOGLE_CREDENTIALS'로 저장했는지 꼭 확인하세요!
+json_creds = os.environ['GOOGLE_CREDENTIALS']
+creds_dict = json.loads(json_creds)
+
+# 2. 인증 설정 (파일 경로 대신 딕셔너리 사용)
 scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+
+# [중요] from_json_keyfile_name -> from_json_keyfile_dict 로 변경됨
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 
-# 2. 스프레드시트 열기
-# 주의: 구글 시트 제목을 정확히 적어주세요
-spreadsheet = client.open('구글_스프레드시트_제목') 
+# 3. 스프레드시트 열기
+# '구글_스프레드시트_제목'을 본인의 실제 시트 제목으로 바꿔주세요.
+spreadsheet = client.open('구글_스프레드시트_제목')
 sheet = spreadsheet.sheet1
 
-# 3. 데이터 가져오기
+# 4. 데이터 가져오기
 data = sheet.get_all_values()
-headers = data.pop(0)
-df = pd.DataFrame(data, columns=headers)
+if not data:
+    print("데이터가 없습니다.")
+else:
+    headers = data.pop(0)
+    df = pd.DataFrame(data, columns=headers)
 
-# 4. 필터링 (F열 & publish=TRUE)
-# F열 이름 자동 찾기 (6번째 열)
-col_f = df.columns[5]
+    # 5. 필터링 (F열 & publish=TRUE)
+    # F열이 존재하는지 확인
+    if len(df.columns) > 5:
+        col_f = df.columns[5]
+        
+        # 조건: F열이 archived 이고, publish가 TRUE
+        condition = (df[col_f] == 'archived') & (df['publish'] == 'TRUE')
+        result = df[condition].head(1)
 
-# 조건: F열이 archived 이고, publish가 TRUE
-condition = (df[col_f] == 'archived') & (df['publish'] == 'TRUE')
-result = df[condition].head(1)
-
-print(result)
+        print("--- 추출 결과 ---")
+        print(result)
+    else:
+        print("열의 개수가 부족합니다 (F열 없음)")
