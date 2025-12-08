@@ -152,29 +152,30 @@ try:
     print("="*30)
 
     # =========================================================
-    # PART 5. 슬랙(Slack)으로 전송하기
+    # 6. 슬랙 전송 & 시트 업데이트 (published 처리)
     # =========================================================
-    print("\n--- [NEW] 슬랙 전송 시작 ---")
+    print("--- 슬랙 전송 시작 ---")
     
-    try:
-        webhook_url = os.environ['SLACK_WEBHOOK_URL']
+    webhook_url = os.environ['SLACK_WEBHOOK_URL']
+    payload = {"text": final_message}
+    
+    slack_res = requests.post(webhook_url, json=payload)
+    
+    if slack_res.status_code == 200:
+        print("✅ 슬랙 전송 성공!")
         
-        payload = {
-            "text": final_message
-        }
-        
-        response = requests.post(webhook_url, json=payload)
-        
-        if response.status_code == 200:
-            print("✅ 슬랙 전송 성공!")
-        else:
-            print(f"❌ 전송 실패 (상태 코드: {response.status_code})")
-            print(response.text)
+        # [NEW] 전송 성공 시 상태 변경 (archived -> published)
+        try:
+            print(f"▶ 시트 상태 업데이트 중... (행: {update_row_index}, 열: 6)")
+            # 6번째 열(F열)을 'published'로 수정
+            sheet.update_cell(update_row_index, 6, 'published')
+            print("✅ 상태 변경 완료 (archived -> published)")
+        except Exception as e:
+            print(f"⚠️ 상태 업데이트 실패: {e}")
             
-    except KeyError:
-        print("⚠️ 경고: SLACK_WEBHOOK_URL 시크릿이 설정되지 않아서 전송을 건너뜁니다.")
-    except Exception as e:
-        print(f"❌ 슬랙 전송 중 에러 발생: {e}")
+    else:
+        print(f"❌ 전송 실패 (상태 코드: {slack_res.status_code})")
+        print(slack_res.text)
 
 except Exception as e:
     print(f"\n❌ 에러 발생: {e}")
