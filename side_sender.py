@@ -8,6 +8,15 @@ from bs4 import BeautifulSoup
 from openai import OpenAI
 
 # =========================================================
+# [설정] 시트 헤더 이름 설정 (이 부분을 실제 시트와 맞춰주세요)
+# =========================================================
+SHEET_NAME = '플린트스토닝 소재 DB'
+COL_TITLE = 'title'      # 제목 컬럼 헤더명
+COL_URL = 'url'          # URL 컬럼 헤더명
+COL_STATUS = 'status'    # 상태 컬럼 헤더명 (기존 F열)
+COL_PUBLISH = 'publish'  # 발행 여부 컬럼 헤더명
+
+# =========================================================
 # 1. 설정 및 인증
 # =========================================================
 try:
@@ -19,81 +28,84 @@ try:
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
 
-    # ★ [체크] 시트 제목이 맞는지 꼭 확인하세요!
-    spreadsheet = client.open('플린트스토닝 소재 DB') 
+    spreadsheet = client.open(SHEET_NAME) 
     sheet = spreadsheet.sheet1
 
     # 데이터 가져오기
     data = sheet.get_all_values()
     if not data:
-        print("데이터가 없습니다.")
+        print("❌ 데이터가 없습니다.")
         exit()
 
     headers = data.pop(0)
     df = pd.DataFrame(data, columns=headers)
 
     # =========================================================
-    # 2. 필터링 (F열: archived, publish: TRUE)
+    # 2. 필터링 (Status: archived, Publish: TRUE)
     # =========================================================
-    if len(df.columns) <= 5:
-        print("열 개수가 부족합니다.")
-        exit()
-
-    col_f = df.columns[5] # F열 (6번째)
     
-    # 조건 확인 (archived & TRUE)
-    condition = (df[col_f].str.strip() == 'archived') & (df['publish'].str.strip() == 'TRUE')
+    # 필수 헤더 존재 여부 확인
+    required_cols = [COL_TITLE, COL_URL, COL_STATUS, COL_PUBLISH]
+    for col in required_cols:
+        if col not in df.columns:
+            print(f"❌ 오류: 시트에 '{col}' 헤더가 없습니다. 헤더 이름을 확인해주세요.")
+            exit()
+
+    # 조건 확인 (공백 제거 후 비교)
+    condition = (df[COL_STATUS].str.strip() == 'archived') & (df[COL_PUBLISH].str.strip() == 'TRUE')
     target_rows = df[condition]
 
     if target_rows.empty:
-        print("발송할 대상(archived & publish=TRUE)이 없습니다.")
+        print("ℹ️ 발송할 대상(archived & publish=TRUE)이 없습니다.")
         exit()
 
     # 첫 번째 행 선택
     row = target_rows.iloc[0]
     
-    # ★★★ [이 부분이 핵심입니다] 행 번호 저장 ★★★
-    # Pandas 인덱스는 0부터 시작, 헤더 1줄 제외했으므로 실제 시트 행 번호는 +2 해야 함
+    # 행 번호 계산 (헤더 1줄 + 0-based index 보정 = +2)
     update_row_index = row.name + 2
     
-    print(f"▶ 선택된 행 번호: {update_row_index}")
+    # 상태 업데이트를 위한 열 번호 계산 (헤더 리스트에서 인덱스 찾기 + 1)
+    # 이렇게 하면 열이 이동해도 헤더 이름만 같다면 안전합니다.
+    status_col_index = headers.index(COL_STATUS) + 1
 
-    # =========================================================
-    # 3. 데이터 추출 (제목 & url)
-    # =========================================================
+    project_title = row[COL_TITLE]
+    target_url = row[COL_URL]
     
-    # ★ [체크] 엑셀 헤더 이름 확인
-    title_col_name = 'title' 
-    url_col_name = 'url'
-
-    if title_col_name not in row or url_col_name not in row:
-        print(f"오류: 엑셀에 '{title_col_name}' 또는 '{url_col_name}' 헤더가 없습니다.")
-        exit()
-    
-    project_title = row[title_col_name]
-    target_url = row[url_col_name]
-    
+    print(f"▶ 선택된 행: {update_row_index}")
     print(f"▶ 제목: {project_title}")
-    print(f"▶ url: {target_url}")
+    print(f"▶ URL: {target_url}")
 
     # =========================================================
-    # 4. 웹 스크래핑
+    # 3. 웹 스크래핑
     # =========================================================
     print("--- 스크래핑 시작 ---")
     headers_ua = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
     
-    response = requests.get(target_url, headers=headers_ua, timeout=10)
-    if response.status_code != 200:
-        print(f"접속 실패 (상태 코드: {response.status_code})")
+    try:
+        response = requests.get(target_url, headers=headers_ua, timeout=15)
+        response.raise_for_status() # 4xx, 5xx 에러 시 예외 발생
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        paragraphs = soup.find_all('p')
+        full_text = " ".join([p.get_text() for p in paragraphs])
+        
+        if len(full_text) < 50:
+            # P 태그가 없거나 내용이 너무 짧은 경우 (동적 페이지 등)
+            full_text = soup.get_text() # 전체 텍스트 긁기 시도
+
+        truncated_text = full_text[:3000].strip()
+        
+        if not truncated_text:
+            raise Exception("본문 내용을 추출할 수 없습니다.")
+
+    except Exception as e:
+        print(f"❌ 스크래핑 실패: {e}")
+        # 스크래핑 실패 시 여기서 종료하거나, 슬랙으로 에러 메시지를 보낼 수 있습니다.
         exit()
 
-    soup = BeautifulSoup(response.text, 'html.parser')
-    paragraphs = soup.find_all('p')
-    full_text = " ".join([p.get_text() for p in paragraphs])
-    truncated_text = full_text[:3000]
-
     # =========================================================
-    # 5. GPT 요약
+    # 4. GPT 요약
     # =========================================================
     print("--- GPT 요약 요청 ---")
     client_openai = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
@@ -121,48 +133,38 @@ try:
         ]
     )
 
-    # 1. GPT 응답 내용 가져오기
     gpt_body = completion.choices[0].message.content
 
-    # 2. [중요] final_message를 먼저 정의해야 합니다!
     final_message = f"*추천 프로젝트*\n<{target_url}|{project_title}>\n\n{gpt_body}"
-    
-    # 3. 그 다음, 링크와 이모지를 추가합니다.
     final_message_with_link = f"{final_message}\n\n🔗 <{target_url}|모집공고 바로가기>"
     
-    print("--- 최종 결과물 ---")
-    print(final_message_with_link)
-
+    print("--- 최종 결과물 생성 완료 ---")
 
     # =========================================================
-    # 6. 슬랙 전송 & 시트 업데이트 (published 처리)
+    # 5. 슬랙 전송 & 시트 업데이트
     # =========================================================
     print("--- 슬랙 전송 시작 ---")
     
     webhook_url = os.environ['SLACK_WEBHOOK_URL']
-    
-    # 4. 전송할 때는 링크가 포함된 변수(final_message_with_link)를 사용
     payload = {"text": final_message_with_link}
     
     slack_res = requests.post(webhook_url, json=payload)
     
-    # ... (이하 동일)
-    
     if slack_res.status_code == 200:
         print("✅ 슬랙 전송 성공!")
         
-        # 전송 성공 시 상태 변경 (archived -> published)
         try:
-            print(f"▶ 시트 상태 업데이트 중... (행: {update_row_index}, 열: 6)")
-            # 6번째 열(F열)을 'published'로 수정
-            sheet.update_cell(update_row_index, 6, 'published')
+            print(f"▶ 시트 상태 업데이트 중... (행: {update_row_index}, 열: {status_col_index})")
+            # 헤더 이름으로 찾은 정확한 열 위치 업데이트
+            sheet.update_cell(update_row_index, status_col_index, 'published')
             print("✅ 상태 변경 완료 (archived -> published)")
         except Exception as e:
             print(f"⚠️ 상태 업데이트 실패: {e}")
+            # 참고: 업데이트 실패해도 슬랙은 이미 갔으므로 치명적이지 않음
             
     else:
         print(f"❌ 전송 실패 (상태 코드: {slack_res.status_code})")
         print(slack_res.text)
 
 except Exception as e:
-    print(f"\n❌ 에러 발생: {e}")
+    print(f"\n❌ 치명적 에러 발생: {e}")
