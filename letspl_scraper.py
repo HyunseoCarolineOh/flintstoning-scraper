@@ -116,7 +116,7 @@ def get_projects():
                         new_data.append({
                             'title': title,
                             'url': full_url,
-                            'created_at': today
+                            'scraped_at': today
                         })
             except Exception as e:
                 # 개별 요소 에러는 무시하고 계속 진행
@@ -142,10 +142,10 @@ def update_sheet(worksheet, data):
     try:
         idx_title = headers.index('title')
         idx_url = headers.index('url')
-        idx_created_at = headers.index('created_at')
+        idx_scraped_at = headers.index('scraped_at')
         idx_status = headers.index('status')
     except ValueError:
-        print("⛔ 헤더 오류: 시트 1행에 title, url, created_at, status 가 있어야 합니다.")
+        print("⛔ 헤더 오류: 시트 1행에 title, url, scraped_at, status 가 있어야 합니다.")
         return
 
     existing_urls = set()
@@ -161,7 +161,7 @@ def update_sheet(worksheet, data):
         new_row = [''] * len(headers)
         new_row[idx_title] = item['title']
         new_row[idx_url] = item['url']
-        new_row[idx_created_at] = item['created_at']
+        new_row[idx_scraped_at] = item['scraped_at']
         new_row[idx_status] = 'archived'
         
         rows_to_append.append(new_row)
