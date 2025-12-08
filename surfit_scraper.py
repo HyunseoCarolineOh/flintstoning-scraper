@@ -91,7 +91,7 @@ for article in articles:
         if link and title and len(title) > 10 and "로그인" not in title:
             surfit_data.append({
                 'title': title, 'subtitle': '', 'url': link, 
-                'created_at': today_date, 'company': '', 'status': 'archived', 'publish': ''
+                'scraped_at': today_date, 'company': '', 'status': 'archived', 'publish': ''
             })
     except: continue
 
