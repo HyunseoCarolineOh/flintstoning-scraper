@@ -96,28 +96,33 @@ try:
     print("--- GPT 요약 요청 ---")
     client_openai = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
 
-    # [수정] 회사명 추출을 위한 프롬프트
     gpt_prompt = f"""
-    너는 채용 정보를 분석해서 핵심만 전달하는 '채용 알리미 봇'이야.
-    아래 [채용 공고]를 읽고, **출력 양식**을 엄격하게 지켜서 답변해.
-    이모지는 사용하지 말고, 명확한 줄글로 작성해.
-
+    너는 채용 정보를 분석하는 AI야. 아래 [채용 정보]를 보고 회사명과 요약을 추출해.
+    
     [중요 지침]
-    1. **맨 첫 줄**에는 반드시 이 공고를 올린 *회사 이름*만 적어. (형식: "Company: 회사명")
-    2. 회사 이름을 찾을 수 없다면 "Company: 알수없음"이라고 적어.
-    3. 그 다음 줄부터 요약 내용을 작성해.
+    1. **회사 이름 찾기 규칙**:
+       - 가장 중요한 힌트는 **제목(Title)**에 있어.
+       - 제목에 `[회사명]` 혹은 `[팀명]` 처럼 대괄호가 있다면 그 안의 단어를 회사명으로 추출해.
+       - 예시: "[인턴] [노트폴리오] 마케팅 담당자" -> Company: 노트폴리오
+       - 만약 제목에 회사명이 없다면 본문에서 찾아.
+       
+    2. **함정 피하기**:
+       - 본문에 "(주)원티드랩은 서울 송파구에..." 같은 문구는 채용 플랫폼의 설명일 뿐이야. **이것을 회사명으로 적지 마.** (단, 제목 자체가 원티드랩 채용인 경우는 제외)
 
-    [출력 양식]
-    Company: (회사명)
+    3. **출력 양식**:
+       Company: (회사명)
+       (여기서부터 요약 내용 작성)
 
-    [채용 공고]
-    {truncated_text}
+    [채용 정보]
+    제목: {project_title}
+    본문: {truncated_text}
     """
 
+    # (이후 호출 코드는 동일)
     completion = client_openai.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model="gpt-3.5-turbo", # 또는 gpt-4o-mini 추천 (더 똑똑하고 저렴함)
         messages=[
-            {"role": "system", "content": "You are a helpful HR assistant. Do not use emojis."},
+            {"role": "system", "content": "You are a helpful HR assistant."},
             {"role": "user", "content": gpt_prompt}
         ]
     )
