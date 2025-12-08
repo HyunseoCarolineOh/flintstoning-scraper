@@ -118,7 +118,7 @@ try:
     *추천 채용 공고*
     [{company_name}] {project_title}
 
-    여기에 요약 내용을 2~3문장으로 자연스럽게 작성해. 해요체(~합니다)를 사용해.
+    여기에 회사 정보를 헤드헌터의 입장에서 2~3문장으로 자연스럽게 작성해. 해요체(~합니다)를 사용해.
     
     -
 
@@ -148,7 +148,7 @@ try:
 
     # [수정] A안 반영: 링크 누락 방지를 위해 파이썬에서 URL 강제 결합
     # GPT가 마지막에 '-'를 넣었으므로 그 아래에 링크 추가
-    final_message_with_link = f"{final_message}\n\n👉 <{target_url}|바로가기>"
+    final_message_with_link = f"{final_message}\n\n <{target_url}|공고 바로가기>"
 
     print("--- 최종 전송 메시지 ---")
     print(final_message_with_link)
