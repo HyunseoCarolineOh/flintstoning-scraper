@@ -1,4 +1,4 @@
-name: Letple Sender Run
+name: Letspl Sender Run
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
     - cron: '0 11 * * *'
 
 jobs:
-  run-letple:
+  run-letspl:
     runs-on: ubuntu-latest
     
     steps:
@@ -28,5 +28,5 @@ jobs:
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      # [중요] letple_sender.py 실행
-      run: python letple_sender.py
+      # [중요] letspl_sender.py 실행
+      run: python letspl_sender.py
