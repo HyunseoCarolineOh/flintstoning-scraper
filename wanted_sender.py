@@ -61,7 +61,7 @@ try:
     # 3. 데이터 추출 (제목, URL) - 회사명은 GPT가 찾음
     # =========================================================
     
-    title_col_name = '제목' 
+    title_col_name = 'title' 
     url_col_name = 'url'
 
     if title_col_name not in row or url_col_name not in row:
