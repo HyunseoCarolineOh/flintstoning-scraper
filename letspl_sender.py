@@ -11,7 +11,7 @@ from openai import OpenAI
 # 1. 설정 및 인증
 # =========================================================
 try:
-    print("--- [Letple Sender] 시작 ---")
+    print("--- [Letspl Sender] 시작 ---")
     
     json_creds = os.environ['GOOGLE_CREDENTIALS']
     creds_dict = json.loads(json_creds)
