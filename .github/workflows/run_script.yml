@@ -1,7 +1,13 @@
 name: 엑셀 필터링 및 요약 실행
 
 on:
+  # 1. 수동 실행 버튼 (테스트용)
   workflow_dispatch:
+  
+  # 2. 자동 스케줄링 (한국 시간 매일 저녁 8시)
+  # UTC 기준 11시 = KST 기준 20시(저녁 8시)
+  schedule:
+    - cron: '0 11 * * *'
 
 jobs:
   run-filter:
@@ -26,4 +32,3 @@ jobs:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       run: python main.py
-  
