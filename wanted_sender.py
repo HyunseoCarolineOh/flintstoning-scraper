@@ -102,55 +102,62 @@ try:
     full_text = " ".join([p.get_text() for p in paragraphs])
     truncated_text = full_text[:3000]
 
-    # =========================================================
+        # =========================================================
     # 5. GPT 요약 (회사명 지정 + 회사 소개 작성)
     # =========================================================
     print("--- GPT 요약 요청 ---")
     client_openai = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
 
-    # [수정] 본문 요약 대신 '회사에 대한 설명'을 요청하도록 프롬프트 변경
     gpt_prompt = f"""
-    너는 채용 공고를 분석해서 슬랙(Slack) 메시지로 보내기 좋은 형태로 바꿔주는 봇이야.
-    아래 [채용 정보]와 너의 배경지식을 활용해서, **출력 예시**와 똑같은 포맷으로 답변해.
+    [목표]
+    - 에디터들이 봤을 때 "이 포지션이 어떤 회사의 어떤 역할인지" 한눈에 이해하게 한다.
+    - 회사 소개는 2~3줄 정도로, 채용 공고 본문과 너의 배경지식을 활용해 구체적으로 작성한다.
+    - 필요 이상으로 장황하게 쓰지 말고, 핵심만 전달한다.
 
-    [출력 예시]
+    [출력 형식 예시]
+
     *추천 채용 공고*
     [{company_name}] {project_title}
 
-    여기에 **[{company_name}]가 어떤 회사인지(주요 서비스, 비즈니스 모델 등)**를 2~3줄로 설명해줘.
-    채용 공고 본문의 내용을 참고하되, 네가 알고 있는 회사라면 그 지식을 활용해서 구체적으로 적어줘.
-    어투는 해요체(~합니다)를 사용해.
+    프로덕트와 콘텐츠를 동시에 다루는 디지털 스튜디오로,
+    브랜딩과 캠페인, 콘텐츠 제작을 통합적으로 수행합니다.
+    B2B 브랜드와 함께 장기적인 콘텐츠 전략을 설계하는 일을 중심으로 합니다.
 
+    위 형식을 그대로 따르되, 회사 설명 부분은 아래 [채용 정보]를 참고해서 네가 새로 써줘.
 
     [작성 규칙]
-    1. 첫 줄은 무조건 `*추천 채용 공고*`로 고정해.
-    2. 두 번째 줄은 반드시 `[{company_name}] {project_title}` 그대로 작성해.
-    3. "이 회사는..." 처럼 주어로 시작하지 말고 자연스럽게 바로 설명을 시작해.
-    4. 불필요한 서두(예: "알겠습니다")는 절대 넣지 마.
+    1. 첫 줄은 무조건 `*추천 채용 공고*`로 시작한다.
+    2. 두 번째 줄은 반드시 `[{company_name}] {project_title}` 형식으로 쓴다.
+    3. 그 아래에 회사 설명을 2~3줄로 쓴다.
+    4. "이 회사는..." 으로 시작하지 말고 바로 설명을 시작한다.
+    5. 불필요한 서두(예: "알겠습니다")는 절대 넣지 않는다.
+    6. 슬랙 이모지는 넣지 않는다. (링크는 파이썬 코드에서 붙인다.)
 
     [채용 정보]
     회사명: {company_name}
     공고 제목: {project_title}
-    본문 텍스트: {truncated_text}
+    본문 텍스트(일부): {truncated_text}
     """
 
     completion = client_openai.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model="gpt-4.1",  # 최신 엔진 사용
         messages=[
-            {"role": "system", "content": "You are a helpful HR assistant. You are good at explaining what a company does."},
+            {
+                "role": "system",
+                "content": "너는 채용 공고를 Slack 메시지 형식으로 정리하는 전문 어시스턴트다. 문체는 간결하고 정보 중심이어야 하며, 불필요한 인사말이나 메타 코멘트는 포함하지 않는다."
+            },
             {"role": "user", "content": gpt_prompt}
-        ]
+        ],
+        temperature=0.3,
     )
 
-    final_message = completion.choices[0].message.content.strip()
-    
+    base_message = completion.choices[0].message.content.strip()
+    final_message_with_link = f"{base_message}\n\n🔗 <{target_url}|공고 바로가기>"
+
     print("--- GPT 응답 완료 ---")
-
-    # 링크 추가
-    final_message_with_link = f"{final_message}\n\n 🔗 <{target_url}|공고 바로가기>"
-
     print("--- 최종 전송 메시지 ---")
     print(final_message_with_link)
+
     
     # =========================================================
     # 6. 슬랙 전송 & 시트 업데이트 (published 처리)
