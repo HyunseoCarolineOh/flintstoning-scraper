@@ -167,7 +167,7 @@ try:
     
     final_message_with_link = (
         f"*<지금 주목해야 할 아티클>*\n\n"
-        f"제목: {project_title}\n\n"
+        f"{project_title}\n\n"
         f"{gpt_body}\n\n"
         f"👉 {formatted_link}"
     )
