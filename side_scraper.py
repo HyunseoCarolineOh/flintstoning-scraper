@@ -18,7 +18,7 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1nKPVCZ6zAOfpqCjV6WfjkzCI55F
 TARGET_GID = 1818966683
 SCRAPE_URL = "https://sideproject.co.kr/projects"
 
-# [추가됨] 감지할 지역 키워드 리스트
+# 지역 키워드
 REGION_KEYWORDS = [
     "서울", "경기", "인천", "대전", "대구", "부산", "광주", "울산", "세종", 
     "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주", "온라인"
@@ -46,15 +46,33 @@ def get_google_sheet():
 
 def get_driver():
     chrome_options = Options()
+    
+    # [중요] 봇 탐지 우회 옵션 추가
     chrome_options.add_argument("--headless") 
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
     
+    # 자동화 제어 문구 제거 (봇 탐지 방지)
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option("useAutomationExtension", False)
+    
+    # 일반 사용자처럼 보이게 User-Agent 설정
     user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     chrome_options.add_argument(f"user-agent={user_agent}")
     
     driver = webdriver.Chrome(options=chrome_options)
+    
+    # navigator.webdriver 속성을 undefined로 변경 (자바스크립트 탐지 우회)
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": """
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            })
+        """
+    })
+    
     return driver
 
 def get_projects():
@@ -66,15 +84,21 @@ def get_projects():
         print("🌐 사이트 접속 중...")
         driver.get(SCRAPE_URL)
         
+        # [수정] 로딩 대기 시간 및 방식 변경
         try:
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'idx=')]"))
+            print("⏳ 데이터 로딩 대기 중 (최대 30초)...")
+            # 20초 -> 30초로 연장
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "a"))
             )
+            # 확실한 렌더링을 위해 강제 대기 추가
+            time.sleep(5) 
             print("✅ 로딩 완료")
-            time.sleep(2)
         except:
-            print("⚠️ 대기 시간 초과")
-
+            print("⚠️ 대기 시간 초과 (스크린샷 저장)")
+            driver.save_screenshot("error_screenshot.png") # 에러 시 상태 확인용
+            
+        # 모든 링크 수집
         elements = driver.find_elements(By.TAG_NAME, "a")
         print(f"🔍 발견된 링크: {len(elements)}개")
 
@@ -83,16 +107,14 @@ def get_projects():
                 raw_link = elem.get_attribute("href")
                 if not raw_link: continue
 
+                # 사이드프로젝트 사이트 구조에 맞는 링크 필터링
                 if "idx=" in raw_link and "bmode=view" in raw_link:
-                    # 텍스트 전체 가져오기 (제목 + 메타데이터 포함될 수 있음)
                     raw_text = elem.text.strip()
                     if not raw_text: continue 
 
-                    # 제목 추출 (줄바꿈이 있다면 첫 줄이나 긴 줄을 제목으로 간주)
                     lines = raw_text.split('\n')
                     title = lines[0] if lines else raw_text
                     
-                    # [추가됨] 지역 정보 추출 로직
                     location = "미정"
                     for keyword in REGION_KEYWORDS:
                         if keyword in raw_text:
@@ -109,7 +131,7 @@ def get_projects():
                                 'title': title,
                                 'url': full_url,
                                 'scraped_at': today,
-                                'location': location  # [추가됨]
+                                'location': location
                             })
             except:
                 continue
@@ -127,8 +149,7 @@ def update_sheet(worksheet, data):
     
     if not all_values:
         print("⚠️ 시트가 비어있습니다. 헤더를 생성합니다.")
-        # [수정됨] location 포함된 헤더
-        headers = ['title', 'url', 'scraped_at', 'status', 'location'] 
+        headers = ['title', 'url', 'scraped_at', 'status', 'location']
         worksheet.append_row(headers)
         all_values = [headers]
     
@@ -139,11 +160,9 @@ def update_sheet(worksheet, data):
         idx_url = headers.index('url')
         idx_scraped_at = headers.index('scraped_at')
         idx_status = headers.index('status')
-        # [추가됨] location 인덱스 찾기
         idx_location = headers.index('location')
     except ValueError as e:
         print(f"⛔ 헤더 오류: 1행에 {e} 컬럼이 있어야 합니다.")
-        print("💡 시트 1행에 'location' 컬럼을 추가해주세요.")
         return
 
     existing_urls = set()
@@ -161,13 +180,13 @@ def update_sheet(worksheet, data):
         new_row[idx_url] = item['url']
         new_row[idx_scraped_at] = item['scraped_at']
         new_row[idx_status] = 'archived'
-        new_row[idx_location] = item['location'] # [추가됨]
+        new_row[idx_location] = item['location']
         
         rows_to_append.append(new_row)
 
     if rows_to_append:
         print(f"📝 데이터 쓰기 시작... (총 {len(rows_to_append)}건)")
-        worksheet.append_rows(rows_to_append) 
+        worksheet.append_rows(rows_to_append)
         print(f"💾 저장 완료!")
     else:
         print("ℹ️ 새로운 공고 없음.")
