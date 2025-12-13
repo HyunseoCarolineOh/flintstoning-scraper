@@ -81,14 +81,27 @@ try:
     print(f"▶ URL: {target_url}")
 
     # =========================================================
-    # 3. 웹 스크래핑
+    # 3. 웹 스크래핑 (수정됨)
     # =========================================================
     print("--- 스크래핑 시작 ---")
-    headers_ua = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    
+    # [수정] 봇 차단 우회를 위해 헤더를 실제 크롬 브라우저처럼 상세하게 설정
+    headers_ua = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Referer': 'https://www.google.com/',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1'
+    }
     
     try:
+        # verify=False 옵션은 SSL 인증서 에러가 날 경우를 대비해 추가할 수 있으나, 일단은 기본으로 시도
         response = requests.get(target_url, headers=headers_ua, timeout=15)
-        response.raise_for_status()
+        response.raise_for_status() # 4xx, 5xx 에러 시 예외 발생
 
         soup = BeautifulSoup(response.text, 'html.parser')
         paragraphs = soup.find_all('p')
