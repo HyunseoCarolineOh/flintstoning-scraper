@@ -23,10 +23,10 @@ try:
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
 
-    # 시트 열기 (파일명은 기존과 동일)
+    # 시트 열기
     spreadsheet = client.open('플린트스토닝 소재 DB')
     
-    # [수정됨] 인덱스 번호 대신 '서핏'이라는 탭 이름을 직접 찾습니다.
+    # '서핏' 탭 연결
     try:
         sheet = spreadsheet.worksheet('서핏')
         print(f"📂 연결된 시트: {sheet.title}")
@@ -116,4 +116,84 @@ try:
         truncated_text = full_text[:3000]
         
     except Exception as e:
-        print(f"❌ 스크래핑 실패:
+        # [수정된 부분] 닫는 따옴표와 변수 처리
+        print(f"❌ 스크래핑 실패: {e}")
+        exit()
+
+    # =========================================================
+    # 5. GPT 요약
+    # =========================================================
+    print("--- GPT 요약 요청 ---")
+    client_openai = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
+
+    gpt_prompt = f"""
+    너는 IT/테크 트렌드를 분석해주는 '인사이트 큐레이터'야.
+    아래 [글 내용]을 읽고, 팀원들에게 공유할 수 있게 요약해줘.
+
+    [작성 규칙]
+    1. **어조**: 모든 문장은 반드시 '**~합니다.**' 또는 '**~입니다.**'와 같은 정중한 합쇼체(경어)로 끝내야 해.
+    2. **금지**: '~음', '~함', '~것' 같은 명사형 종결이나 반말은 절대 사용하지 마.
+    3. **이모지**: 본문 내용 중에 이모지를 절대 사용하지 마.
+
+    [출력 양식]
+    *내용 요약*
+    (글의 핵심 내용을 3문장 내외의 줄글로 작성. 반드시 경어로 끝낼 것.)
+
+    *추천 이유*
+    (이 글을 팀원들에게 읽어보라고 추천하는 이유나 핵심 가치를 1~2문장으로 작성. 반드시 경어로 끝낼 것.)
+
+    [글 내용]
+    {truncated_text}
+    """
+
+    completion = client_openai.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant. Use polite Korean sentences ending in period."},
+            {"role": "user", "content": gpt_prompt}
+        ]
+    )
+
+    gpt_body = completion.choices[0].message.content
+
+    # 슬랙 메시지 조립
+    slack_link_format = f"<{target_url}|아티클 바로가기>"
+    
+    final_message_with_link = (
+        f"*<지금 주목해야 할 아티클>*\n\n"
+        f"제목: {project_title}\n\n"
+        f"{gpt_body}\n\n"
+        f"👉 {slack_link_format}"
+    )
+    
+    print("--- 최종 결과물 ---")
+    print(final_message_with_link)
+
+    # =========================================================
+    # 6. 슬랙 전송 & 시트 업데이트
+    # =========================================================
+    print("--- 슬랙 전송 시작 ---")
+    webhook_url = os.environ['SLACK_WEBHOOK_URL']
+    payload = {"text": final_message_with_link}
+    
+    slack_res = requests.post(webhook_url, json=payload)
+    
+    if slack_res.status_code == 200:
+        print("✅ 슬랙 전송 성공!")
+        
+        try:
+            # status 컬럼 인덱스 찾기 (+1 보정)
+            status_col_index = headers.index(COL_STATUS) + 1
+            
+            print(f"▶ 시트 상태 업데이트 중... (행: {update_row_index}, 열: {status_col_index})")
+            sheet.update_cell(update_row_index, status_col_index, 'published')
+            print("✅ 상태 변경 완료 (archived -> published)")
+        except Exception as e:
+            print(f"⚠️ 상태 업데이트 실패: {e}")
+            
+    else:
+        print(f"❌ 전송 실패 (상태 코드: {slack_res.status_code})")
+        print(slack_res.text)
+
+except Exception as e:
+    print(f"🚨 전체 실행 중 에러 발생: {e}")
