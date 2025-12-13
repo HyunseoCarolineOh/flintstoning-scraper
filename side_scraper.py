@@ -6,7 +6,7 @@ import gspread
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
 
-# 셀레니움 관련 (bs4 삭제함)
+# 셀레니움 관련
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -18,6 +18,12 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1nKPVCZ6zAOfpqCjV6WfjkzCI55F
 TARGET_GID = 1818966683
 SCRAPE_URL = "https://sideproject.co.kr/projects"
 
+# [추가됨] 감지할 지역 키워드 리스트
+REGION_KEYWORDS = [
+    "서울", "경기", "인천", "대전", "대구", "부산", "광주", "울산", "세종", 
+    "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주", "온라인"
+]
+
 def get_google_sheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds_dict = json.loads(os.environ['GOOGLE_CREDENTIALS'])
@@ -27,7 +33,6 @@ def get_google_sheet():
     spreadsheet = client.open_by_url(SHEET_URL)
     worksheet = None
     
-    # GID로 시트 찾기
     for sheet in spreadsheet.worksheets():
         if str(sheet.id) == str(TARGET_GID):
             worksheet = sheet
@@ -46,7 +51,6 @@ def get_driver():
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
     
-    # 봇 차단 회피
     user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     chrome_options.add_argument(f"user-agent={user_agent}")
     
@@ -62,7 +66,6 @@ def get_projects():
         print("🌐 사이트 접속 중...")
         driver.get(SCRAPE_URL)
         
-        # 데이터 로딩 대기
         try:
             WebDriverWait(driver, 20).until(
                 EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'idx=')]"))
@@ -72,7 +75,6 @@ def get_projects():
         except:
             print("⚠️ 대기 시간 초과")
 
-        # 모든 링크 수집
         elements = driver.find_elements(By.TAG_NAME, "a")
         print(f"🔍 발견된 링크: {len(elements)}개")
 
@@ -82,9 +84,21 @@ def get_projects():
                 if not raw_link: continue
 
                 if "idx=" in raw_link and "bmode=view" in raw_link:
-                    title = elem.text.strip()
-                    if not title: continue 
+                    # 텍스트 전체 가져오기 (제목 + 메타데이터 포함될 수 있음)
+                    raw_text = elem.text.strip()
+                    if not raw_text: continue 
 
+                    # 제목 추출 (줄바꿈이 있다면 첫 줄이나 긴 줄을 제목으로 간주)
+                    lines = raw_text.split('\n')
+                    title = lines[0] if lines else raw_text
+                    
+                    # [추가됨] 지역 정보 추출 로직
+                    location = "미정"
+                    for keyword in REGION_KEYWORDS:
+                        if keyword in raw_text:
+                            location = keyword
+                            break
+                    
                     idx_match = re.search(r'idx=(\d+)', raw_link)
                     if idx_match:
                         idx = idx_match.group(1)
@@ -94,7 +108,8 @@ def get_projects():
                             new_data.append({
                                 'title': title,
                                 'url': full_url,
-                                'scraped_at': today
+                                'scraped_at': today,
+                                'location': location  # [추가됨]
                             })
             except:
                 continue
@@ -108,35 +123,27 @@ def get_projects():
     return new_data
 
 def update_sheet(worksheet, data):
-    # 1. 시트의 모든 값 가져오기
     all_values = worksheet.get_all_values()
     
-    # 시트가 비어있으면 헤더가 없는 것
     if not all_values:
-        print("⚠️ 시트가 비어있습니다. 헤더가 없습니다.")
-        headers = []
-        last_row = 1 # 데이터가 하나도 없으면 1행부터라고 가정
-    else:
-        headers = all_values[0]
-        # 실제 데이터가 있는 마지막 줄 찾기 (빈 줄 제외)
-        last_row = len(all_values) 
-        # 만약 1000줄이 있는데 데이터는 1줄뿐이라면?
-        # 구글 시트는 보통 빈 행도 값으로 칠 수 있으므로, 역순으로 검사해서 실제 데이터 위치를 찾습니다.
-        for i in range(len(all_values) - 1, 0, -1):
-            if any(all_values[i]): # 행에 뭔가 내용이 있으면
-                last_row = i + 1   # 그 다음 줄부터 써라
-                break
-            else:
-                last_row = 1 # 헤더만 있고 아래가 다 비었으면 2번째 줄(인덱스 1)부터
+        print("⚠️ 시트가 비어있습니다. 헤더를 생성합니다.")
+        # [수정됨] location 포함된 헤더
+        headers = ['title', 'url', 'scraped_at', 'status', 'location'] 
+        worksheet.append_row(headers)
+        all_values = [headers]
+    
+    headers = all_values[0]
 
-    # 헤더 위치 찾기
     try:
         idx_title = headers.index('title')
         idx_url = headers.index('url')
         idx_scraped_at = headers.index('scraped_at')
         idx_status = headers.index('status')
-    except ValueError:
-        print("⛔ 헤더 오류: 1행에 title, url, scraped_at, status 가 정확히 있어야 합니다.")
+        # [추가됨] location 인덱스 찾기
+        idx_location = headers.index('location')
+    except ValueError as e:
+        print(f"⛔ 헤더 오류: 1행에 {e} 컬럼이 있어야 합니다.")
+        print("💡 시트 1행에 'location' 컬럼을 추가해주세요.")
         return
 
     existing_urls = set()
@@ -154,17 +161,14 @@ def update_sheet(worksheet, data):
         new_row[idx_url] = item['url']
         new_row[idx_scraped_at] = item['scraped_at']
         new_row[idx_status] = 'archived'
+        new_row[idx_location] = item['location'] # [추가됨]
+        
         rows_to_append.append(new_row)
 
     if rows_to_append:
-        # 빈 줄 무시하고 바로 이어 쓰기 위해 append_rows 대신 insert_rows 사용하거나 범위를 지정해야 함
-        # 가장 쉬운 방법: append_rows를 쓰되, table_range를 인식하게 함.
-        # 하지만 gspread의 append_rows는 기본적으로 '시트의 끝'에 추가함.
-        # 시트가 1000줄이면 1001줄에 추가하는 게 기본 동작.
-        
         print(f"📝 데이터 쓰기 시작... (총 {len(rows_to_append)}건)")
         worksheet.append_rows(rows_to_append) 
-        print(f"💾 저장 완료! (시트 스크롤을 맨 아래 1000행 근처까지 내려보세요)")
+        print(f"💾 저장 완료!")
     else:
         print("ℹ️ 새로운 공고 없음.")
 
