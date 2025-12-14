@@ -173,9 +173,9 @@ try:
     
     final_message_with_link = (
         f"*<지금 주목해야 할 아티클>*\n\n"
-        f"{project_title}\n\n"
+        f"*{project_title}*\n\n"
         f"{gpt_body}\n\n"
-        f"👉 {slack_link_format}"
+        f"🔗 {slack_link_format}"
     )
     
     print("--- 최종 결과물 ---")
