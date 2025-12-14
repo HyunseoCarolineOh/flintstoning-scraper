@@ -137,7 +137,7 @@ try:
     # 3. 내용: GPT 요약 내용
     # 4. 링크: '아티클 바로가기' 텍스트에 URL 적용
     
-    final_message = f"<사이드프로젝트 동료 찾고 있어요>\n\n" \
+    final_message = f"*<사이드프로젝트 동료 찾고 있어요>*\n\n" \
                     f"*{project_title}*\n\n" \
                     f"*지역:* {project_location}\n\n" \
                     f"{gpt_body}\n\n" \
