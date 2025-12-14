@@ -161,7 +161,7 @@ try:
     # 2. 순서: 공고명, 지역, 프로젝트 요약, 이런 분..., URL
     # 3. URL: <URL|바로가기> 형태
     
-    final_message = f"<사이드프로젝트 동료 찾고 있어요>\n\n" \
+    final_message = f"*<사이드프로젝트 동료 찾고 있어요>*\n\n" \
                     f"*{project_title}*\n\n" \
                     f"*지역:* {project_location}\n\n" \
                     f"{gpt_body}\n\n" \
