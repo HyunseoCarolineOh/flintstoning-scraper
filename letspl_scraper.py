@@ -69,12 +69,11 @@ def get_projects():
         driver.get(SCRAPE_URL)
         
         wait = WebDriverWait(driver, 15)
-        # 프로젝트 카드 요소를 기다립니다.
+        # 프로젝트 카드가 로딩될 때까지 대기
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href^='/project/']")))
         
-        time.sleep(3) # 페이지 로딩 대기
+        time.sleep(3) # 안정적인 로딩을 위해 잠시 대기
         
-        # 모든 프로젝트 카드 요소(<a> 태그)를 찾습니다.
         elements = driver.find_elements(By.CSS_SELECTOR, "a[href^='/project/']")
         print(f"🔍 발견된 프로젝트 링크 수: {len(elements)}개")
 
@@ -82,59 +81,64 @@ def get_projects():
             try:
                 full_url = elem.get_attribute("href")
                 
-                # URL 유효성 검사
+                # URL 유효성 검사 (프로젝트 상세 페이지 링크가 맞는지)
                 if not re.search(r'/project/\d+', full_url):
                     continue
-
-                # ================= [수정된 부분 시작] =================
                 
-                # 1. [중요] 실제 제목 요소만 콕 집어서 가져오기
-                # <a> 태그 안에서 제목 역할을 하는 특정 클래스를 가진 요소를 찾습니다.
-                # 주의: 사이트 구조가 변경되면 이 부분의 선택자(class 이름 등)가 바뀔 수 있습니다.
+                # ==========================================
+                # [핵심 수정] 제목만 정확하게 핀셋으로 집어내기
+                # ==========================================
+                title = ""
                 try:
-                    # 렛플의 일반적인 제목 클래스 패턴을 추정하여 찾습니다.
-                    # (여러 개의 클래스 이름 중 하나가 제목일 것으로 추정)
-                    title_element = elem.find_element(By.CSS_SELECTOR, "div[class*='title'], h3, h4, strong")
-                    title = title_element.text.strip()
-                except Exception:
-                     # 만약 제목 요소를 별도로 찾지 못했다면, 기존 방식처럼 전체 텍스트의 첫 줄을 사용하거나 건너뜁니다.
-                    # print(f"⚠️ 제목 요소를 특정하지 못해 건너뜁니다: {full_url}")
-                    # continue
-                    
-                    # (대안) 전체 텍스트에서 첫 번째 의미 있는 줄을 제목으로 사용 (기존 방식보다 나음)
-                    raw_text = elem.text.strip()
-                    lines = [line.strip() for line in raw_text.split('\n') if len(line.strip()) > 2 and "모집" not in line]
-                    title = lines[0] if lines else ""
+                    # 렛플 사이트 구조상 제목은 보통 h3, h4, 또는 tit 클래스를 가진 요소에 있습니다.
+                    # '팔로우' 버튼이나 설명글은 이 태그 안에 들어있지 않으므로 자연스럽게 걸러집니다.
+                    title_elem = elem.find_element(By.CSS_SELECTOR, "h3, h4, div.tit, strong")
+                    title = title_elem.text.strip()
+                except:
+                    # 혹시 태그로 못 찾을 경우를 대비한 비상 대책
+                    pass
 
-                if not title or len(title) < 2:
-                    continue
-                    
-                # 2. 지역 정보 추출 (기존 로직 활용)
-                # 지역 추출을 위해 전체 텍스트를 다시 가져옵니다.
-                raw_text_for_location = elem.text.strip()
-                lines_for_location = raw_text_for_location.split('\n')
-                
+                # 비상 대책: 태그로 못 찾았거나 제목이 비어있다면 텍스트 필터링 시도
+                if not title:
+                    raw_text = elem.text
+                    lines = raw_text.split('\n')
+                    # '팔로우', '모집' 등이 들어간 줄은 무조건 제외
+                    clean_lines = [
+                        line.strip() for line in lines 
+                        if len(line.strip()) > 1 
+                        and "팔로우" not in line 
+                        and "모집" not in line
+                        and "스크랩" not in line
+                    ]
+                    # 남은 줄 중 첫 번째 줄을 제목으로 간주
+                    if clean_lines:
+                        title = clean_lines[0]
+                    else:
+                        title = "제목 없음"
+
+                # ==========================================
+                # [기존 유지] 지역 정보 추출 로직
+                # ==========================================
                 location = "미정"
-                for line in lines_for_location:
-                    for keyword in REGION_KEYWORDS:
-                        if keyword in line:
-                            location = keyword
-                            break
-                    if location != "미정":
+                # 전체 텍스트에서 지역 키워드 찾기
+                full_text = elem.text 
+                for keyword in REGION_KEYWORDS:
+                    if keyword in full_text:
+                        location = keyword
                         break
-                        
-                # ================= [수정된 부분 끝] =================
 
-                # 데이터 저장
-                if not any(d['url'] == full_url for d in new_data):
-                    new_data.append({
-                        'title': title,
-                        'url': full_url,
-                        'scraped_at': today,
-                        'location': location
-                    })
+                # 데이터 저장 (제목이 2글자 이상인 경우만)
+                if len(title) > 1:
+                    if not any(d['url'] == full_url for d in new_data):
+                        new_data.append({
+                            'title': title,
+                            'url': full_url,
+                            'scraped_at': today,
+                            'location': location
+                        })
+                        
             except Exception as e:
-                # print(f"⚠️ 개별 항목 처리 중 오류: {e}") # 디버깅용
+                # 개별 항목 에러는 무시하고 다음으로 진행
                 continue
                 
     except Exception as e:
