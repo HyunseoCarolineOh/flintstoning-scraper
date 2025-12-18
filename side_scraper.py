@@ -1,200 +1,86 @@
-import time
-import re
-import os
-import json
+import os, time, json, re
 import gspread
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
-
-# 셀레니움 관련
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# 설정
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1nKPVCZ6zAOfpqCjV6WfjkzCI55FA9r2yvi9XL3iIneo/edit"
-TARGET_GID = 1818966683
-SCRAPE_URL = "https://sideproject.co.kr/projects"
+# [설정] 이 파일 전용 정보
+CONFIG = {
+    "name": "사이드프로젝트",
+    "url": "https://sideproject.co.kr/projects",
+    "gid": "1818966683" # 탭 고유 번호
+}
 
-# 지역 키워드
-REGION_KEYWORDS = [
-    "서울", "경기", "인천", "대전", "대구", "부산", "광주", "울산", "세종", 
-    "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주", "온라인"
-]
-
-def get_google_sheet():
+# [공통] 시트 연결 (GID로 찾기)
+def get_worksheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds_dict = json.loads(os.environ['GOOGLE_CREDENTIALS'])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
-    
-    spreadsheet = client.open_by_url(SHEET_URL)
-    worksheet = None
-    
-    for sheet in spreadsheet.worksheets():
-        if str(sheet.id) == str(TARGET_GID):
-            worksheet = sheet
-            break
-            
-    if worksheet is None:
-        raise Exception(f"GID가 {TARGET_GID}인 시트를 찾을 수 없습니다.")
-    
-    print(f"📂 연결된 시트: {worksheet.title}")
-    return worksheet
+    spreadsheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1nKPVCZ6zAOfpqCjV6WfjkzCI55FA9r2yvi9XL3iIneo/edit")
+    # 순서가 바뀌어도 ID로 탭을 찾음
+    sheet = next((s for s in spreadsheet.worksheets() if str(s.id) == CONFIG["gid"]), None)
+    if not sheet: raise Exception(f"{CONFIG['gid']} 시트를 못 찾았습니다.")
+    return sheet
 
+# [공통] 브라우저 실행
 def get_driver():
-    chrome_options = Options()
-    
-    # [중요] 봇 탐지 우회 옵션 추가
-    chrome_options.add_argument("--headless") 
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--window-size=1920,1080")
-    
-    # 자동화 제어 문구 제거 (봇 탐지 방지)
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option("useAutomationExtension", False)
-    
-    # 일반 사용자처럼 보이게 User-Agent 설정
-    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    chrome_options.add_argument(f"user-agent={user_agent}")
-    
-    driver = webdriver.Chrome(options=chrome_options)
-    
-    # navigator.webdriver 속성을 undefined로 변경 (자바스크립트 탐지 우회)
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": """
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            })
-        """
-    })
-    
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    driver = webdriver.Chrome(options=options)
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"})
     return driver
 
-def get_projects():
+# [전용] 데이터 수집
+def scrape_projects():
     driver = get_driver()
     new_data = []
     today = datetime.now().strftime("%Y-%m-%d")
+    regions = ["서울", "경기", "인천", "대전", "대구", "부산", "광주", "울산", "세종", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주", "온라인"]
 
     try:
-        print("🌐 사이트 접속 중...")
-        driver.get(SCRAPE_URL)
+        driver.get(CONFIG["url"])
+        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "a")))
+        time.sleep(5)
         
-        # [수정] 로딩 대기 시간 및 방식 변경
-        try:
-            print("⏳ 데이터 로딩 대기 중 (최대 30초)...")
-            # 20초 -> 30초로 연장
-            WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "a"))
-            )
-            # 확실한 렌더링을 위해 강제 대기 추가
-            time.sleep(5) 
-            print("✅ 로딩 완료")
-        except:
-            print("⚠️ 대기 시간 초과 (스크린샷 저장)")
-            driver.save_screenshot("error_screenshot.png") # 에러 시 상태 확인용
-            
-        # 모든 링크 수집
-        elements = driver.find_elements(By.TAG_NAME, "a")
-        print(f"🔍 발견된 링크: {len(elements)}개")
-
-        for elem in elements:
-            try:
-                raw_link = elem.get_attribute("href")
-                if not raw_link: continue
-
-                # 사이드프로젝트 사이트 구조에 맞는 링크 필터링
-                if "idx=" in raw_link and "bmode=view" in raw_link:
-                    raw_text = elem.text.strip()
-                    if not raw_text: continue 
-
-                    lines = raw_text.split('\n')
-                    title = lines[0] if lines else raw_text
-                    
-                    location = "미정"
-                    for keyword in REGION_KEYWORDS:
-                        if keyword in raw_text:
-                            location = keyword
-                            break
-                    
-                    idx_match = re.search(r'idx=(\d+)', raw_link)
-                    if idx_match:
-                        idx = idx_match.group(1)
-                        full_url = f"https://sideproject.co.kr/projects/?bmode=view&idx={idx}"
-                        
-                        if not any(d['url'] == full_url for d in new_data):
-                            new_data.append({
-                                'title': title,
-                                'url': full_url,
-                                'scraped_at': today,
-                                'location': location
-                            })
-            except:
-                continue
+        for elem in driver.find_elements(By.TAG_NAME, "a"):
+            href = elem.get_attribute("href")
+            if href and "idx=" in href and "bmode=view" in href:
+                text = elem.text.strip()
+                if not text: continue
                 
-    except Exception as e:
-        print(f"❌ 에러: {e}")
-    finally:
-        driver.quit()
-            
-    print(f"🎯 수집된 공고: {len(new_data)}개")
+                loc = next((k for k in regions if k in text), "미정")
+                idx = re.search(r'idx=(\d+)', href).group(1)
+                full_url = f"https://sideproject.co.kr/projects/?bmode=view&idx={idx}"
+                
+                if not any(d['url'] == full_url for d in new_data):
+                    new_data.append({'title': text.split('\n')[0], 'url': full_url, 'scraped_at': today, 'location': loc})
+    finally: driver.quit()
     return new_data
 
-def update_sheet(worksheet, data):
-    all_values = worksheet.get_all_values()
+# [공통] 스마트 저장 (헤더 이름 기준)
+def update_sheet(ws, data):
+    if not data: return print(f"[{CONFIG['name']}] 새 공고 없음")
+    all_v = ws.get_all_values()
+    headers = all_v[0] if all_v else ['title', 'url', 'scraped_at', 'status', 'location']
+    col_map = {name: i for i, name in enumerate(headers)}
+    existing_urls = {row[col_map['url']] for row in all_v[1:] if len(row) > col_map['url']}
     
-    if not all_values:
-        print("⚠️ 시트가 비어있습니다. 헤더를 생성합니다.")
-        headers = ['title', 'url', 'scraped_at', 'status', 'location']
-        worksheet.append_row(headers)
-        all_values = [headers]
-    
-    headers = all_values[0]
-
-    try:
-        idx_title = headers.index('title')
-        idx_url = headers.index('url')
-        idx_scraped_at = headers.index('scraped_at')
-        idx_status = headers.index('status')
-        idx_location = headers.index('location')
-    except ValueError as e:
-        print(f"⛔ 헤더 오류: 1행에 {e} 컬럼이 있어야 합니다.")
-        return
-
-    existing_urls = set()
-    for row in all_values[1:]:
-        if len(row) > idx_url:
-            existing_urls.add(row[idx_url])
-
-    rows_to_append = []
+    rows = []
     for item in data:
-        if item['url'] in existing_urls:
-            continue
-            
-        new_row = [''] * len(headers)
-        new_row[idx_title] = item['title']
-        new_row[idx_url] = item['url']
-        new_row[idx_scraped_at] = item['scraped_at']
-        new_row[idx_status] = 'archived'
-        new_row[idx_location] = item['location']
-        
-        rows_to_append.append(new_row)
-
-    if rows_to_append:
-        print(f"📝 데이터 쓰기 시작... (총 {len(rows_to_append)}건)")
-        worksheet.append_rows(rows_to_append)
-        print(f"💾 저장 완료!")
-    else:
-        print("ℹ️ 새로운 공고 없음.")
+        if item['url'] in existing_urls: continue
+        row = [''] * len(headers)
+        for k, v in item.items():
+            if k in col_map: row[col_map[k]] = v
+        if 'status' in col_map: row[col_map['status']] = 'archived'
+        rows.append(row)
+    
+    if rows: ws.append_rows(rows); print(f"💾 {CONFIG['name']} {len(rows)}건 저장")
 
 if __name__ == "__main__":
-    try:
-        sheet = get_google_sheet()
-        projects = get_projects()
-        update_sheet(sheet, projects)
-    except Exception as e:
-        print(f"🚨 실행 실패: {e}")
+    ws = get_worksheet(); data = scrape_projects(); update_sheet(ws, data)
