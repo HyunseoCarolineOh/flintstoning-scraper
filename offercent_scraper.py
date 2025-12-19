@@ -36,48 +36,46 @@ def get_driver():
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"})
     return driver
 
-# [전용] 데이터 수집
+# [전용] 데이터 수집 개선 버전
 def scrape_projects():
     driver = get_driver()
     new_data = []
     today = datetime.now().strftime("%Y-%m-%d")
-    urls = set() # URL 중복 방지 (카드 기준)
+    urls = set()
     
     try:
         driver.get(CONFIG["url"])
         wait = WebDriverWait(driver, 20)
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "a")))
+        # 1. 초기 로딩 대기 강화
+        wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a[href*='/job/']")))
         
         for _ in range(10):
-            # 1. 공고 카드(a 태그)들을 먼저 찾음
+            # 2. 현재 화면에 로드된 모든 카드 탐색
             cards = driver.find_elements(By.TAG_NAME, "a")
             
             for card in cards:
                 href = card.get_attribute("href")
-                if not href or "company-list" in href: continue
+                # 공고 상세 페이지가 아닌 링크(목록, 메뉴 등) 제외
+                if not href or "company-list" in href or "/job/" not in href: continue
                 
                 try:
-                    # 2. 회사명 추출 (제목 클래스가 없는 greet-typography 찾기)
-                    # 카드 전체 텍스트에서 회사명은 보통 상단에 위치함
                     all_spans = card.find_elements(By.CSS_SELECTOR, "span.greet-typography")
                     
                     company = ""
-                    # 제목 요소들만 따로 리스트로 수집
                     title_elements = []
                     
                     for s in all_spans:
-                        class_attr = s.get_attribute("class")
+                        class_attr = s.get_attribute("class") or ""
                         txt = s.text.strip()
-                        if not txt: continue
+                        if not txt or "채용 중인 공고" in txt: continue # 불필요 문구 필터링
                         
-                        if "xlyipyv" in class_attr: # 제목 클래스 발견 시
+                        if "xlyipyv" in class_attr:
                             title_elements.append(txt)
-                        elif not company: # 제목 클래스가 없고 아직 회사명을 못찾았다면
+                        elif not company:
                             company = txt
 
-                    # 3. 발견된 모든 제목을 각각의 데이터로 저장
-                    # 중복 방지를 위해 (URL + 제목) 조합으로 체크하는 것이 안전함
                     for title in title_elements:
+                        # 중복 식별자: URL + 제목 (한 카드 내 멀티 공고 대응)
                         data_id = f"{href}_{title}"
                         if data_id not in urls:
                             new_data.append({
@@ -87,13 +85,12 @@ def scrape_projects():
                                 'scraped_at': today
                             })
                             urls.add(data_id)
-                            
-                except Exception as e:
-                    continue
+                except: continue
             
-            # 스크롤 후 대기
+            # 3. 스크롤 후 요소가 추가로 로드될 때까지 명시적 대기
+            last_height = driver.execute_script("return document.body.scrollHeight")
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2.5)
+            time.sleep(3) # 물리적 대기 시간 확보
             
     finally: driver.quit()
     return new_data
