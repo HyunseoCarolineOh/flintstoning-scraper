@@ -36,7 +36,7 @@ def get_driver():
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"})
     return driver
 
-# [전용] 데이터 수집 - 최종 보정판
+# [전용] 데이터 수집 (타임아웃 해결 버전)
 def scrape_projects():
     driver = get_driver()
     new_data = []
@@ -45,27 +45,25 @@ def scrape_projects():
     
     try:
         driver.get(CONFIG["url"])
-        # 타임아웃 에러 방지: 요소 하나만 나타나도 즉시 실행
+        
+        # [수정] 엄격한 요소 대기 대신 페이지 body가 로드되면 즉시 진행
         wait = WebDriverWait(driver, 15)
         try:
-            wait.until(EC.presence_of_element_located((By.TAG_NAME, "a")))
+            wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         except:
-            print("⚠️ 로딩 지연 발생 - 계속 진행합니다.")
-
-        # 누락 방지를 위한 충분한 스크롤 (10회)
-        for i in range(10):
-            # 현재 페이지에 존재하는 모든 카드(a 태그) 획득
-            cards = driver.find_elements(By.TAG_NAME, "a")
+            print("⚠️ 페이지 로딩 지연 중이나 수집을 시도합니다.")
             
+        # 데이터가 렌더링될 최소한의 시간 확보
+        time.sleep(5)
+
+        for _ in range(10):
+            cards = driver.find_elements(By.TAG_NAME, "a")
             for card in cards:
                 href = card.get_attribute("href")
-                # 상세 공고 페이지(/job/) 링크인지 확인
                 if not href or "/job/" not in href: continue
                 
                 try:
-                    # 카드 내부의 모든 텍스트(span) 추출
                     all_spans = card.find_elements(By.CSS_SELECTOR, "span.greet-typography")
-                    
                     company = ""
                     title_list = []
                     
@@ -74,35 +72,30 @@ def scrape_projects():
                         txt = s.text.strip()
                         if not txt or "채용 중인 공고" in txt: continue
                         
-                        # 제목 클래스(xlyipyv)가 있으면 제목 리스트에 추가
                         if "xlyipyv" in cls:
                             title_list.append(txt)
-                        # 제목이 아니고 아직 회사명이 비어있다면 회사명으로 저장
                         elif not company:
                             company = txt
 
-                    # 한 카드 내의 여러 제목 처리
                     for title in title_list:
-                        unique_id = f"{href}_{title}"
-                        if unique_id not in urls_check:
+                        data_id = f"{href}_{title}"
+                        if data_id not in urls_check:
                             new_data.append({
                                 'company': company,
                                 'title': title,
                                 'url': href,
                                 'scraped_at': today
                             })
-                            urls_check.add(unique_id)
+                            urls_check.add(data_id)
                 except:
                     continue
             
-            # 스크롤 후 새로운 콘텐츠가 로드될 시간을 줌 (비엠스마일 누락 방지)
+            # 스크롤 후 대기 시간 확보 (누락 방지)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(3) 
 
     finally: 
         driver.quit()
-    
-    print(f"✅ 총 {len(new_data)}건의 공고를 수집했습니다.")
     return new_data
     
 # [공통] 스마트 저장 (헤더 이름 기준)
