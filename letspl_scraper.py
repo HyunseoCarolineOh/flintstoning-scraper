@@ -35,7 +35,7 @@ def get_driver():
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"})
     return driver
 
-# [전용] 데이터 수집 (캐로셀 제외 및 이전 로직 복구)
+# [전용] 데이터 수집 (누락 방지 이전 버전 - 안정화 및 오타 수정)
 def scrape_projects():
     driver = get_driver()
     new_data = []
@@ -47,19 +47,46 @@ def scrape_projects():
         driver.get(CONFIG["url"])
         wait = WebDriverWait(driver, 15)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href^='/project/']")))
+        
+        # 이전 버전처럼 정해진 시간만큼만 대기 (스크롤 없음)
         time.sleep(5) 
         
         cards = driver.find_elements(By.CSS_SELECTOR, "a[href^='/project/']")
 
         for elem in cards:
             try:
-                card_class = elem.get_attribute("class")
-                if "Comment" in card_class or "newProject" in card_c정")
+                # 1. 캐로셀(주목중) 카드 제외 (오타 수정 완료)
+                card_class = elem.get_attribute("class") or ""
+                if "Comment" in card_class or "newProject" in card_class:
+                    continue
+
+                href = elem.get_attribute("href")
+                if not re.search(r'/project/\d+', href): continue
+                
+                # 2. 이전의 안정적인 제목 찾기 로직
+                title = ""
+                try:
+                    h3_elem = elem.find_element(By.TAG_NAME, "h3")
+                    title_elem = h3_elem.find_element(By.CSS_SELECTOR, "span[class*='TitleTxt']")
+                    title = title_elem.text.strip()
+                except:
+                    # h3 구조가 아닐 경우를 대비한 최소한의 백업
+                    BAD_WORDS = ["팔로우", "주목중", "D-", "NEW", "렛플이"]
+                    lines = elem.text.split('\n')
+                    clean_lines = [l.strip() for l in lines if len(l.strip()) > 1 
+                                   and not any(bad in l for bad in BAD_WORDS)]
+                    if clean_lines: title = clean_lines[0]
+
+                if not title or len(title) < 2: continue
+
+                loc = next((k for k in REGIONS if k in elem.text), "미정")
                 
                 if not any(d['url'] == href for d in new_data):
                     new_data.append({'title': title, 'url': href, 'scraped_at': today, 'location': loc})
-            except: continue
-    finally: driver.quit()
+            except: 
+                continue
+    finally: 
+        driver.quit()
     return new_data
 
 # [공통] 스마트 저장
