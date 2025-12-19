@@ -43,7 +43,7 @@ def get_driver():
     })
     return driver
 
-# [전용] 데이터 수집 로직
+# [전용] 데이터 수집 - 로딩 대기 로직 강화 버전
 def scrape_projects():
     driver = get_driver()
     new_data = []
@@ -53,18 +53,22 @@ def scrape_projects():
     try:
         driver.get(CONFIG["url"])
         
-        # 페이지 로딩 대기
-        wait = WebDriverWait(driver, 15)
+        # [개선 2] 명시적 대기(Explicit Wait) 설정
+        # 20초 동안 'job' 링크를 가진 공고 카드가 최소 1개 나타날 때까지 기다립니다.
+        wait = WebDriverWait(driver, 20)
         try:
-            wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            print("⏳ 공고 데이터 로딩 대기 중...")
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/job/']")))
+            # 요소가 발견된 후에도 레이아웃이 완전히 잡히도록 물리적 시간을 약간 더 줍니다.
+            time.sleep(3) 
+            print("✅ 로딩 완료: 데이터를 수집합니다.")
         except:
-            pass # 타임아웃 시에도 일단 진행
+            # 타임아웃 발생 시 에러를 내지 않고 수집 시도 (이미 로딩되었을 수 있으므로)
+            print("⚠️ 로딩 대기 시간이 초과되었습니다. 현재 상태에서 수집을 시도합니다.")
             
-        time.sleep(5) # 동적 콘텐츠 로딩을 위한 추가 대기
-
-        # 무한 스크롤 형태 대응 (최대 10회 스크롤)
+        # 스크롤 및 수집 반복
         for _ in range(10):
-            # 모든 공고 카드(a 태그) 추출
+            # cards 정의 (NameError 방지)
             cards = driver.find_elements(By.TAG_NAME, "a")
             
             for card in cards:
@@ -72,22 +76,20 @@ def scrape_projects():
                 if not href or "/job/" not in href: continue
                 
                 try:
-                    # 'body-02' 변형 속성을 가진 span들이 회사명과 제목을 담고 있음
+                    # 기존에 확인한 data-variant="body-02" 기준 수집
                     elements = card.find_elements(By.CSS_SELECTOR, 'span[data-variant="body-02"]')
                     if not elements: continue
 
-                    # 텍스트 추출 및 정제
                     texts = [el.text.strip() for el in elements if el.text.strip()]
                     
                     if len(texts) >= 2:
-                        company = texts[0]  # 첫 번째 span은 회사명
-                        titles = texts[1:]  # 이후 span들은 해당 카드의 공고 제목들
+                        company = texts[0]
+                        titles = texts[1:]
                         
                         for title in titles:
-                            # '6일 전', '1개월 이상' 등의 날짜/기간 키워드 필터링
+                            # 날짜 정보 필터링
                             if any(x in title for x in ["전", "개월", "일", "주"]): continue
                             
-                            # 중복 수집 방지 (동일 URL + 동일 제목 조합)
                             data_id = f"{href}_{title}"
                             if data_id not in urls_check:
                                 new_data.append({
@@ -100,12 +102,14 @@ def scrape_projects():
                 except:
                     continue
             
-            # 스크롤 다운하여 추가 데이터 로드
+            # 스크롤 후 새로운 콘텐츠 로딩 대기
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(3) 
 
     finally: 
         driver.quit()
+    
+    print(f"📊 최종 수집된 건수: {len(new_data)}건")
     return new_data
     
 # [공통] 시트 데이터 업데이트
