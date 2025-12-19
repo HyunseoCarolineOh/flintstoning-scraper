@@ -40,7 +40,7 @@ def scrape_projects():
     driver = get_driver()
     new_data = []
     today = datetime.now().strftime("%Y-%m-%d")
-    REGIONS = ["서울", "경기", "인천", "대전", "대구", "부산", "광주", "울산", "세종", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주", "온라인"]
+    REGIONS = ["서울", "경기", "인천", "대전", "대구", "부산", "광주", "울산", "세종", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주", "온라인", "지역무관]
 
     try:
         print(f"🌐 {CONFIG['name']} 접속 중...")
@@ -56,30 +56,7 @@ def scrape_projects():
                 # 1. 캐로셀(주목중) 카드인지 먼저 확인해서 제외하기
                 # 캐로셀 카드는 클래스명에 'Comment'나 'newProject' 문구가 포함되어 있습니다.
                 card_class = elem.get_attribute("class")
-                if "Comment" in card_class or "newProject" in card_class:
-                    continue
-
-                href = elem.get_attribute("href")
-                if not re.search(r'/project/\d+', href): continue
-                
-                # 2. 이전의 안정적인 제목 찾기 로직으로 복구
-                title = ""
-                try:
-                    h3_elem = elem.find_element(By.TAG_NAME, "h3")
-                    # 클래스명에 TitleTxt가 들어간 span을 찾음
-                    title_elem = h3_elem.find_element(By.CSS_SELECTOR, "span[class*='TitleTxt']")
-                    title = title_elem.text.strip()
-                except:
-                    # h3 구조가 아닐 경우를 대비한 최소한의 백업
-                    BAD_WORDS = ["팔로우", "주목중", "D-", "NEW"]
-                    lines = elem.text.split('\n')
-                    clean_lines = [l.strip() for l in lines if len(l.strip()) > 1 
-                                   and not any(bad in l for bad in BAD_WORDS)]
-                    if clean_lines: title = clean_lines[0]
-
-                if not title or len(title) < 2: continue
-
-                loc = next((k for k in REGIONS if k in elem.text), "미정")
+                if "Comment" in card_class or "newProject" in card_c정")
                 
                 if not any(d['url'] == href for d in new_data):
                     new_data.append({'title': title, 'url': href, 'scraped_at': today, 'location': loc})
