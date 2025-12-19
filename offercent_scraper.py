@@ -36,65 +36,75 @@ def get_driver():
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"})
     return driver
 
-# [전용] 데이터 수집 개선 버전
+# [전용] 데이터 수집 - 최종 보정판
 def scrape_projects():
     driver = get_driver()
     new_data = []
     today = datetime.now().strftime("%Y-%m-%d")
-    urls = set()
+    urls_check = set()
     
     try:
         driver.get(CONFIG["url"])
-        wait = WebDriverWait(driver, 20)
-        # 1. 초기 로딩 대기 강화
-        wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a[href*='/job/']")))
-        
-        for _ in range(10):
-            # 2. 현재 화면에 로드된 모든 카드 탐색
+        # 타임아웃 에러 방지: 요소 하나만 나타나도 즉시 실행
+        wait = WebDriverWait(driver, 15)
+        try:
+            wait.until(EC.presence_of_element_located((By.TAG_NAME, "a")))
+        except:
+            print("⚠️ 로딩 지연 발생 - 계속 진행합니다.")
+
+        # 누락 방지를 위한 충분한 스크롤 (10회)
+        for i in range(10):
+            # 현재 페이지에 존재하는 모든 카드(a 태그) 획득
             cards = driver.find_elements(By.TAG_NAME, "a")
             
             for card in cards:
                 href = card.get_attribute("href")
-                # 공고 상세 페이지가 아닌 링크(목록, 메뉴 등) 제외
-                if not href or "company-list" in href or "/job/" not in href: continue
+                # 상세 공고 페이지(/job/) 링크인지 확인
+                if not href or "/job/" not in href: continue
                 
                 try:
+                    # 카드 내부의 모든 텍스트(span) 추출
                     all_spans = card.find_elements(By.CSS_SELECTOR, "span.greet-typography")
                     
                     company = ""
-                    title_elements = []
+                    title_list = []
                     
                     for s in all_spans:
-                        class_attr = s.get_attribute("class") or ""
+                        cls = s.get_attribute("class") or ""
                         txt = s.text.strip()
-                        if not txt or "채용 중인 공고" in txt: continue # 불필요 문구 필터링
+                        if not txt or "채용 중인 공고" in txt: continue
                         
-                        if "xlyipyv" in class_attr:
-                            title_elements.append(txt)
+                        # 제목 클래스(xlyipyv)가 있으면 제목 리스트에 추가
+                        if "xlyipyv" in cls:
+                            title_list.append(txt)
+                        # 제목이 아니고 아직 회사명이 비어있다면 회사명으로 저장
                         elif not company:
                             company = txt
 
-                    for title in title_elements:
-                        # 중복 식별자: URL + 제목 (한 카드 내 멀티 공고 대응)
-                        data_id = f"{href}_{title}"
-                        if data_id not in urls:
+                    # 한 카드 내의 여러 제목 처리
+                    for title in title_list:
+                        unique_id = f"{href}_{title}"
+                        if unique_id not in urls_check:
                             new_data.append({
                                 'company': company,
                                 'title': title,
                                 'url': href,
                                 'scraped_at': today
                             })
-                            urls.add(data_id)
-                except: continue
+                            urls_check.add(unique_id)
+                except:
+                    continue
             
-            # 3. 스크롤 후 요소가 추가로 로드될 때까지 명시적 대기
-            last_height = driver.execute_script("return document.body.scrollHeight")
+            # 스크롤 후 새로운 콘텐츠가 로드될 시간을 줌 (비엠스마일 누락 방지)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(3) # 물리적 대기 시간 확보
-            
-    finally: driver.quit()
-    return new_data
+            time.sleep(3) 
 
+    finally: 
+        driver.quit()
+    
+    print(f"✅ 총 {len(new_data)}건의 공고를 수집했습니다.")
+    return new_data
+    
 # [공통] 스마트 저장 (헤더 이름 기준)
 def update_sheet(ws, data):
     if not data: return print(f"[{CONFIG['name']}] 새 공고 없음")
