@@ -99,9 +99,11 @@ def scrape_projects():
                                     'scraped_at': today
                                 })
                                 urls_check.add(data_id)
-                except Exception:
-                    # 개별 카드에서 문제 발생 시 프로그램 중단 없이 다음 카드로 이동
-                    continue
+                except Exception as e:
+                    import traceback
+                    print("❌ 상세 에러 로그 시작 ------------------")
+                    print(traceback.format_exc())
+                    print("---------------------------------------")
             
             # 다음 공고 로딩을 위한 스크롤
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
