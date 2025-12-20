@@ -50,6 +50,7 @@ def get_driver():
     return driver
     
 # [전용] 데이터 수집 로직 (스크린샷 추가)
+# [전용] 데이터 수집 로직
 def scrape_projects():
     driver = get_driver()
     new_data = []
@@ -57,11 +58,20 @@ def scrape_projects():
     urls_check = set()
     
     try:
+        print(f"🌐 {CONFIG['url']} 접속 시도 중...")
         driver.get(CONFIG["url"])
-        wait = WebDriverWait(driver, 25) # 대기 시간 소폭 상향
-        # 공고 카드들이 화면에 보일 때까지 대기
+        
+        # [교체 포인트 1] 화면이 뜰 때까지 잠시 대기 후 스크린샷 저장
+        time.sleep(10) 
+        driver.save_screenshot("check_view.png")
+        print("📸 현재 브라우저 화면을 'check_view.png'로 저장했습니다.")
+
+        # [교체 포인트 2] 요소가 나타날 때까지 기다리는 로직 (오류 발생 지점)
+        wait = WebDriverWait(driver, 30)
+        print("🔍 공고 리스트를 찾는 중입니다...")
+        
+        # 특정 요소가 나타나길 기다림 (만약 여기서 멈추면 타임아웃 에러 발생)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/job/']")))
-        time.sleep(5) 
 
         for scroll_idx in range(10):
             # 1. 개별 공고 카드(상자)를 먼저 리스트로 만듭니다.
