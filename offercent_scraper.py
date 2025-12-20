@@ -67,17 +67,19 @@ def scrape_projects():
         print(driver.page_source[:500]) # 페이지 소스 앞부분 500자 출력
         print("--------------------------------")
 
-        # [교체 포인트 2] 요소가 나타날 때까지 기다리는 로직 (오류 발생 지점)
+        # [수정] 더 넓은 범위의 공고 카드를 찾도록 선택자 변경
         wait = WebDriverWait(driver, 30)
         print("🔍 공고 리스트를 찾는 중입니다...")
         
-        # 특정 요소가 나타나길 기다림 (만약 여기서 멈추면 타임아웃 에러 발생)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/job/']")))
-
+        # 1. 특정 클래스나 구조에 의존하지 않고, 링크(a 태그) 중 'job'이 포함된 모든 요소를 기다립니다.
+        wait.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '/job/')]")))
+        
         for scroll_idx in range(10):
-            # 1. 개별 공고 카드(상자)를 먼저 리스트로 만듭니다.
-            # 매번 새로 찾아서 'StaleElement' 오류를 방지합니다.
-            job_cards = driver.find_elements(By.CSS_SELECTOR, "a[href*='/job/']")
+            # 2. 요소를 찾을 때도 XPATH를 사용하여 더 정확하게 타겟팅합니다.
+            job_cards = driver.find_elements(By.XPATH, "//a[contains(@href, '/job/')]")
+            print(f"🔍 현재 {len(job_cards)}개의 공고를 찾았습니다.")
+
+            # ... 이하 동일
             
             for card in job_cards:
                 try:
