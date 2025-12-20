@@ -1,4 +1,4 @@
-import os, time, json, re
+import os, time, json, re, traceback
 import gspread
 from datetime import datetime
 from oauth2client.service_account import ServiceAccountCredentials
@@ -7,39 +7,34 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
-# [설정] 이 파일 전용 정보 (기존과 동일)
+# [설정] 이 파일 전용 정보
 CONFIG = {
     "name": "오퍼센트",
     "url": "https://offercent.co.kr/company-list?jobCategories=0040002%2C0170004",
-    "gid": "639559541" # 오퍼센트 탭 GID
+    "gid": "639559541"
 }
 
-# [공통] 시트 연결 (기존과 동일)
+# [공통] 시트 연결 로직
 def get_worksheet():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds_dict = json.loads(os.environ['GOOGLE_CREDENTIALS'])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1nKPVCZ6zAOfpqCjV6WfjkzCI55FA9r2yvi9XL3iIneo/edit")
-    
     sheet = next((s for s in spreadsheet.worksheets() if str(s.id) == CONFIG["gid"]), None)
     if not sheet: raise Exception(f"{CONFIG['gid']} 시트를 못 찾았습니다.")
     return sheet
 
-# [공통] 브라우저 실행 설정 (기존과 동일)
+# [공통] 브라우저 실행 설정 (차단 방지 옵션 포함)
 def get_driver():
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")  # 추가: GPU 가속 비활성화 (서버 환경 필수)
+    options.add_argument("--disable-gpu") 
     options.add_argument("--window-size=1920,1080")
-    
-    # [핵심 수정] 화면 크기를 PC 규격(1920x1080)으로 강제 설정합니다.
-    # 이렇게 하면 사진 속의 모바일 화면이 아닌, 우리가 처음에 본 PC 화면이 뜹니다.
-    options.add_argument("--window-size=1920,1080")
-    
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     options.add_argument("--disable-blink-features=AutomationControlled")
     
@@ -48,8 +43,8 @@ def get_driver():
         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
     return driver
-    
-# [전용] 데이터 수집 로직
+
+# [전용] 오퍼센트 맞춤 데이터 수집 로직
 def scrape_projects():
     driver = get_driver()
     new_data = []
@@ -59,78 +54,68 @@ def scrape_projects():
     try:
         print(f"🌐 {CONFIG['url']} 접속 시도 중...")
         driver.get(CONFIG["url"])
-        
-        # [교체 포인트 1] 화면이 뜰 때까지 잠시 대기 후 스크린샷 저장
-        time.sleep(10) 
-        driver.save_screenshot("check_view.png")
-        print("--- 현재 페이지 텍스트 일부 추출 ---")
-        print(driver.page_source[:500]) # 페이지 소스 앞부분 500자 출력
-        print("--------------------------------")
+        time.sleep(5)
 
-        # [수정] 더 넓은 범위의 공고 카드를 찾도록 선택자 변경
-        wait = WebDriverWait(driver, 30)
-        print("🔍 공고 리스트를 찾는 중입니다...")
-        
-        # 1. 특정 클래스나 구조에 의존하지 않고, 링크(a 태그) 중 'job'이 포함된 모든 요소를 기다립니다.
-        wait.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '/job/')]")))
-        
+        # [핵심 수정] 타임아웃 발생 시에도 강제 진행하도록 예외 처리
+        wait = WebDriverWait(driver, 20)
+        print("🔍 공고 리스트 탐색 시작...")
+        try:
+            wait.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'job')]")))
+        except TimeoutException:
+            print("⚠️ 타임아웃 발생! 하지만 데이터 추출을 강제 진행합니다.")
+
+        # [핵심 수정] 리스트 활성화를 위한 초기 스크롤
+        driver.execute_script("window.scrollTo(0, 500);")
+        time.sleep(3)
+
         for scroll_idx in range(10):
-            # 2. 요소를 찾을 때도 XPATH를 사용하여 더 정확하게 타겟팅합니다.
-            job_cards = driver.find_elements(By.XPATH, "//a[contains(@href, '/job/')]")
-            print(f"🔍 현재 {len(job_cards)}개의 공고를 찾았습니다.")
+            # [전용] XPATH를 이용한 정밀 타겟팅
+            job_cards = driver.find_elements(By.XPATH, "//a[contains(@href, 'job')]")
+            print(f"✅ 스크롤 {scroll_idx + 1}회차: {len(job_cards)}개의 공고 후보 발견")
 
-            # ... 이하 동일
-            
             for card in job_cards:
                 try:
-                    # 카드가 화면에서 사라졌을 경우를 대비한 안전장치
                     if not card.is_displayed(): continue
-                    
                     href = card.get_attribute("href")
-                    
-                    # 2. 카드 내부에서 'body-02' 속성을 가진 텍스트만 정확히 추출
-                    # 이 방식은 컬럼이 섞이는 문제를 원천적으로 막아줍니다.
-                    content_els = card.find_elements(By.CSS_SELECTOR, 'span[data-variant="body-02"]')
+                    if not href: continue
+
+                    # [전용] 카드 내 텍스트 추출 로직
+                    content_els = card.find_elements(By.TAG_NAME, "span")
                     texts = [el.text.strip() for el in content_els if el.text.strip()]
                     
                     if len(texts) >= 2:
-                        # [컬럼 고정] 첫 번째는 회사명, 나머지는 제목
                         company_name = texts[0]
-                        job_titles = texts[1:]
+                        job_title = texts[1]
                         
-                        for title in job_titles:
-                            # 날짜 정보나 너무 짧은 텍스트는 필터링
-                            if any(x in title for x in ["전", "개월", "일", "주"]) or len(title) < 2:
-                                continue
+                        # 필터링: 날짜 정보 제외
+                        if any(x in job_title for x in ["전", "개월", "일", "주"]) or len(job_title) < 2:
+                            continue
                             
-                            data_id = f"{href}_{title}"
-                            if data_id not in urls_check:
-                                new_data.append({
-                                    'company': company_name,
-                                    'title': title,
-                                    'url': href,
-                                    'scraped_at': today
-                                })
-                                urls_check.add(data_id)
-                except Exception as e:
-                    import traceback
-                    print("❌ 상세 에러 로그 시작 ------------------")
-                    print(traceback.format_exc())
-                    print("---------------------------------------")
+                        data_id = f"{href}_{job_title}"
+                        if data_id not in urls_check:
+                            new_data.append({
+                                'company': company_name,
+                                'title': job_title,
+                                'url': href,
+                                'scraped_at': today
+                            })
+                            urls_check.add(data_id)
+                except:
+                    continue
             
-            # 다음 공고 로딩을 위한 스크롤
+            # 다음 데이터 로딩을 위한 하단 스크롤
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(3)
-            print(f"🔄 스크롤 {scroll_idx + 1}회 진행 중... (현재 {len(new_data)}건 발견)")
 
-    except Exception as e:
-        print(f"❌ 수집 중 오류 발생: {e}")
+    except Exception:
+        print("❌ 수집 중 상세 오류 발생:")
+        print(traceback.format_exc())
     finally: 
         driver.quit()
     
     return new_data
-    
-# [공통] 시트 데이터 업데이트 (기존과 동일)
+
+# [공통] 구글 시트 업데이트 로직
 def update_sheet(ws, data):
     if not data: 
         print(f"[{CONFIG['name']}] 새로 수집된 공고가 없습니다.")
@@ -138,9 +123,10 @@ def update_sheet(ws, data):
 
     all_v = ws.get_all_values()
     headers = all_v[0] if all_v else ['company', 'title', 'url', 'scraped_at', 'status']
-    
     col_map = {name: i for i, name in enumerate(headers)}
-    existing_urls = {row[col_map['url']] for row in all_v[1:] if len(row) > col_map['url']}
+    
+    url_idx = col_map.get('url', 2)
+    existing_urls = {row[url_idx] for row in all_v[1:] if len(row) > url_idx}
     
     rows_to_append = []
     for item in data:
@@ -151,7 +137,6 @@ def update_sheet(ws, data):
             if k in col_map: row[col_map[k]] = v
         
         if 'status' in col_map: row[col_map['status']] = 'archived'
-        
         rows_to_append.append(row)
     
     if rows_to_append:
@@ -160,11 +145,12 @@ def update_sheet(ws, data):
     else:
         print(f"[{CONFIG['name']}] 시트에 이미 모두 반영되어 있습니다.")
 
-# 메인 실행부 (기존과 동일)
+# [메인 실행부]
 if __name__ == "__main__":
     try:
         ws = get_worksheet()
         data = scrape_projects()
         update_sheet(ws, data)
-    except Exception as e:
-        print(f"❌ 실행 중 오류 발생: {e}")
+    except Exception:
+        print("❌ 실행 중 최종 오류 발생:")
+        print(traceback.format_exc())
