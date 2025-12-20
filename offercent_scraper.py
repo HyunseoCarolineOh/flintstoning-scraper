@@ -27,14 +27,13 @@ def get_worksheet():
     if not sheet: raise Exception(f"{CONFIG['gid']} 시트를 못 찾았습니다.")
     return sheet
 
-# [공통] 브라우저 실행 설정 (모바일 레이아웃 대응)
+# [공통] 브라우저 실행 설정
 def get_driver():
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    # 사람처럼 보이기 위한 User-Agent 설정
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
     driver = webdriver.Chrome(options=options)
@@ -43,32 +42,101 @@ def get_driver():
     })
     return driver
 
-# [전용] 데이터 수집 로직 (순서 기반 짝짓기 버전)
+# [전용] 데이터 수집 로직 (에러 수정 및 순서 기반 짝짓기)
 def scrape_projects():
     driver = get_driver()
     new_data = []
     today = datetime.now().strftime("%Y-%m-%d")
     urls_check = set()
     
-    # 디버깅용 스크린샷 저장 경로
     output_dir = "screenshots"
     os.makedirs(output_dir, exist_ok=True)
 
     try:
         driver.get(CONFIG["url"])
         
-        # 1. 공고 데이터 로딩 대기
         wait = WebDriverWait(driver, 20)
         try:
             print("⏳ 모바일 레이아웃 데이터 로딩 대기 중...")
             wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'span[data-variant="body-02"]')))
             time.sleep(5) 
         except:
-            print("⚠️ 로딩 시간이 초과되었습니다. 현재 화면에서 수집을 시도합니다.")
+            print("⚠️ 로딩 시간이 초과되었습니다.")
 
-        # 진단용 스크린샷 찍기
         driver.save_screenshot(os.path.join(output_dir, f"offercent_check_{today}.png"))
 
-        # 2. 스크롤하며 데이터 수집
         for scroll_idx in range(10):
-            elements = driver.find_elements(By.CSS_SELECTOR, 'span[data-variant
+            # [수정] elements 변수를 정의하여 순서 기반 매칭 수행
+            elements = driver.find_elements(By.CSS_SELECTOR, 'span[data-variant="body-02"]')
+            
+            # 2개씩 짝을 지어 처리 (회사명, 제목 순서)
+            for i in range(0, len(elements) - 1, 2):
+                try:
+                    company_txt = elements[i].text.strip()
+                    title_txt = elements[i+1].text.strip()
+
+                    if any(x in title_txt for x in ["전", "개월", "일", "주"]) or len(title_txt) < 2:
+                        continue
+                    
+                    try:
+                        href = elements[i+1].find_element(By.XPATH, "./ancestor::a").get_attribute("href")
+                    except:
+                        href = CONFIG["url"]
+
+                    data_id = f"{href}_{title_txt}"
+                    if data_id not in urls_check:
+                        new_data.append({
+                            'company': company_txt,
+                            'title': title_txt,
+                            'url': href,
+                            'scraped_at': today
+                        })
+                        urls_check.add(data_id)
+                except:
+                    continue
+            
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(3)
+            print(f"🔄 스크롤 {scroll_idx + 1}회 완료 (현재까지 발견: {len(new_data)}건)")
+
+    except Exception as e:
+        print(f"❌ 수집 중 오류 발생: {e}")
+    finally: 
+        driver.quit()
+    
+    return new_data
+
+# [공통] 시트 데이터 업데이트
+def update_sheet(ws, data):
+    if not data: 
+        print(f"[{CONFIG['name']}] 새로 수집된 공고가 없습니다.")
+        return
+
+    all_v = ws.get_all_values()
+    headers = all_v[0] if all_v else ['company', 'title', 'url', 'scraped_at', 'status']
+    
+    col_map = {name: i for i, name in enumerate(headers)}
+    existing_urls = {row[col_map['url']] for row in all_v[1:] if len(row) > col_map['url']}
+    
+    rows_to_append = []
+    for item in data:
+        if item['url'] in existing_urls: continue
+        
+        row = [''] * len(headers)
+        for k, v in item.items():
+            if k in col_map: row[col_map[k]] = v
+        
+        if 'status' in col_map: row[col_map['status']] = 'new'
+        rows_to_append.append(row)
+    
+    if rows_to_append:
+        ws.append_rows(rows_to_append)
+        print(f"💾 {CONFIG['name']} 신규 공고 {len(rows_to_append)}건 저장 완료")
+
+if __name__ == "__main__":
+    try:
+        ws = get_worksheet()
+        data = scrape_projects()
+        update_sheet(ws, data)
+    except Exception as e:
+        print(f"❌ 실행 중 오류 발생: {e}")
