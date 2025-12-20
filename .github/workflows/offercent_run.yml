@@ -28,3 +28,10 @@ jobs:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: |
           python offercent_scraper.py
+          
+      - name: Upload screenshots as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: screenshots
+          path: screenshots/
+          if-no-files-found: ignore # 스크린샷이 없어도 에러 없이 진행
