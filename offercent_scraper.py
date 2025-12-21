@@ -48,7 +48,7 @@ def get_driver():
     return driver
 
 # ==========================================
-# [전용] 오퍼센트 사이트 데이터 수집 로직
+# [전용] 오퍼센트 사이트 데이터 수집 로직 (스크롤 강화 버전)
 # ==========================================
 def scrape_projects():
     driver = get_driver()
@@ -60,29 +60,41 @@ def scrape_projects():
         print(f"🔗 접속 중: {CONFIG['url']}")
         driver.get(CONFIG["url"])
         wait = WebDriverWait(driver, 20)
+        
         # [전용 선택자] 제목 클래스 xqzk367가 나타날 때까지 대기
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a.xqzk367")))
         
-        # 데이터 로드를 위한 스크롤
-        for _ in range(5):
+        # ------------------------------------------------------
+        # 무한 스크롤 로직: 더 이상 새로운 공고가 없을 때까지 내림
+        # ------------------------------------------------------
+        last_height = driver.execute_script("return document.body.scrollHeight")
+        scroll_count = 0
+        max_scrolls = 15  # 수집량에 따라 이 숫자를 늘리세요.
+        
+        print("📥 모든 공고를 불러오기 위해 스크롤을 시작합니다...")
+        while scroll_count < max_scrolls:
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
+            time.sleep(3)  # 로딩 대기 (사이트 속도에 따라 2~4초 조절)
+            
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                print("🏁 더 이상 불러올 공고가 없습니다.")
+                break
+            last_height = new_height
+            scroll_count += 1
+            print(f"🔄 스크롤 중... ({scroll_count}/{max_scrolls})")
 
-        # [제목 로직] 클래스 xqzk367 기반 추출
+        # 스크롤 완료 후 전체 카드 리스트 확보
         cards = driver.find_elements(By.CSS_SELECTOR, "a.xqzk367[href*='/jd/']")
-        print(f"🔍 발견된 공고 카드 개수: {len(cards)}개")
+        print(f"🔍 총 발견된 공고 카드 개수: {len(cards)}개")
 
         for card in cards:
             try:
                 title = card.text.strip()
                 full_href = card.get_attribute("href")
-                clean_url = full_href.split('?')[0]
+                clean_url = full_href.split('?')[0] # URL 파라미터 정제
                 
-                # [수정 포인트] 특정 클래스명 대신, a태그를 감싸고 있는 
-                # 가장 가까운 div(공고 카드 덩어리)를 유연하게 찾습니다.
-                # 보통 제목 -> 부모(div) -> 부모(div) 구조에 회사명이 있습니다.
-                
-                # a태그의 부모 요소부터 차례로 탐색
+                # [유연한 탐색] a태그의 부모 요소를 타고 올라가며 정보 탐색
                 container = card.find_element(By.XPATH, "..") 
                 
                 company_name = "회사명 미상"
@@ -106,13 +118,12 @@ def scrape_projects():
                         else:
                             location = info_text
                         
-                        # 회사명과 지역 정보가 모두 확보되면 탐색 중단
                         if company_name != "회사명 미상" and location:
                             break
                     except:
-                        # 정보를 못 찾으면 한 단계 더 위 부모로 이동
                         container = container.find_element(By.XPATH, "..")
 
+                # 중복 데이터 수집 방지
                 data_id = f"{clean_url}_{title}"
                 if data_id not in urls_check:
                     new_data.append({
@@ -124,16 +135,17 @@ def scrape_projects():
                         'scraped_at': today
                     })
                     urls_check.add(data_id)
-                    print(f"✅ 추출 성공: {company_name} | {title}")
+                    # 상세 로그는 너무 많을 수 있으니 생략하거나 필요시 주석 해제
+                    # print(f"✅ 추출: {company_name} | {title}")
 
-            except Exception as e:
-                # print(f"❌ 개별 카드 오류: {e}") # 필요 시 주석 해제하여 상세 오류 확인
+            except Exception:
                 continue
 
     finally: 
         driver.quit()
+    
+    print(f"📦 최종 수집 완료된 공고: {len(new_data)}건")
     return new_data
-
 # ==========================================
 # [공통] 시트 데이터 업데이트 로직
 # ==========================================
