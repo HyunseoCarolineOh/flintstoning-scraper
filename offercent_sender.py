@@ -6,15 +6,16 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
+import re
 
 # =========================================================
-# 1. 설정 및 인증
+# 1. 설정 및 인증 [Common: 공통 환경 설정]
 # =========================================================
 def main():
     try:
         print("--- [Offercent Sender] 시작 ---")
         
-        # 환경 변수에서 설정값 로드
+        # [Common] API 키 및 환경변수 로드 (보안을 위해 환경변수 사용)
         if 'GOOGLE_CREDENTIALS' not in os.environ:
             raise ValueError("GOOGLE_CREDENTIALS 환경 변수가 설정되지 않았습니다.")
         if 'OPENAI_API_KEY' not in os.environ:
@@ -28,14 +29,11 @@ def main():
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
 
-        # 시트 열기
+        # [Common] 구글 스프레드시트 접근 및 데이터 로드
         spreadsheet = client.open('플린트스토닝 소재 DB') 
-        
-        # 네 번째 탭 선택 (Index 3)
-        sheet = spreadsheet.get_worksheet(3)
-
-        # 데이터 가져오기
+        sheet = spreadsheet.get_worksheet(3) # 네 번째 탭
         data = sheet.get_all_values()
+        
         if not data:
             print("데이터가 없습니다.")
             return
@@ -44,17 +42,14 @@ def main():
         df = pd.DataFrame(data, columns=headers)
 
         # =========================================================
-        # 2. 필터링 (F열: archived, publish: TRUE)
+        # 2. 필터링 로직 [Common: 발송 대상 선별]
         # =========================================================
-        # 안전을 위해 컬럼 인덱스 대신 이름을 확인할 수도 있으나, 
-        # 기존 로직(5번 인덱스=F열)을 유지하되 예외처리를 강화합니다.
+        # F열(상태)이 'archived'이고 publish 열이 'TRUE'인 행만 추출
         if len(df.columns) <= 5:
             print("열 개수가 부족합니다. (F열 필요)")
             return
 
-        col_status_name = df.columns[5] # F열 (보통 'status' 또는 'archive')
-        
-        # 공백 제거 및 조건 확인
+        col_status_name = df.columns[5] 
         condition = (df[col_status_name].str.strip() == 'archived') & (df['publish'].str.strip() == 'TRUE')
         target_rows = df[condition]
 
@@ -62,45 +57,19 @@ def main():
             print("발송할 대상(archived & publish=TRUE)이 없습니다.")
             return
 
-        # 첫 번째 행 선택
+        # 가장 위에 있는 한 개의 행만 처리
         row = target_rows.iloc[0]
-        update_row_index = row.name + 2 # 헤더(1) + 0-based index 보정(1)
+        update_row_index = row.name + 2 
         
-        print(f"▶ 선택된 행 번호: {update_row_index}")
+        # [Common] 기본 데이터 변수 할당
+        project_title = row['title']
+        target_url = row['url']
+        company_name = row.get('company', 'Company')
 
         # =========================================================
-        # 3. 데이터 추출
+        # 3. 웹 스크래핑 [Offercent Specific: 사이트 구조 맞춤 추출]
         # =========================================================
-        
-        # 시트 헤더 이름 설정 (실제 시트 헤더와 일치해야 함)
-        title_col_name = 'title' 
-        url_col_name = 'url'
-        company_col_name = 'company' 
-        # 만약 '포지션' 칼럼이 따로 있다면 여기에 추가 (현재는 title로 대체)
-
-        missing_cols = [c for c in [title_col_name, url_col_name] if c not in row]
-        if missing_cols:
-            print(f"오류: 엑셀 헤더 이름({', '.join(missing_cols)})을 확인해주세요.")
-            return
-
-        project_title = row[title_col_name]
-        target_url = row[url_col_name]
-        
-        # 회사명 처리
-        if company_col_name in row and row[company_col_name]:
-            company_name = row[company_col_name]
-        else:
-            print(f"⚠️ 경고: 회사명이 없어 'Company'로 대체합니다.")
-            company_name = "Company"
-
-        print(f"▶ [Offercent] 회사명: {company_name}")
-        print(f"▶ [Offercent] 제목: {project_title}")
-        print(f"▶ URL: {target_url}")
-
-        # =========================================================
-        # 4. 웹 스크래핑 (Offercent 맞춤)
-        # =========================================================
-        print("--- 스크래핑 시작 ---")
+        print(f"--- [Offercent] 스크래핑 시작: {target_url} ---")
         headers_ua = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
@@ -114,46 +83,41 @@ def main():
 
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # 본문 영역 타겟팅 (Offercent 구조 고려)
+        # [Offercent Specific] 오퍼센트의 본문 영역(main, article 등)을 타겟팅
         content_area = soup.find('main') or soup.find('article') or soup.find('div', {'class': 'description'})
-        
         if not content_area:
-            print("⚠️ 특정 본문 영역을 찾지 못해 전체 페이지에서 텍스트를 추출합니다.")
             content_area = soup
 
-        # 불필요한 태그 제거
+        # [Common] 텍스트 정제: 불필요한 태그 제거 및 공백 통합
         for tag in content_area(['script', 'style', 'nav', 'footer', 'iframe']):
             tag.extract()
 
-        # 텍스트 추출
         full_text = content_area.get_text(separator="\n", strip=True)
-        truncated_text = full_text[:6000] # GPT 입력 한도 고려
-
-        if len(truncated_text) < 50:
-            print("⚠️ 수집된 텍스트가 너무 적습니다. (JavaScript 로딩 페이지일 가능성 있음)")
-            # 필요 시 여기서 Selenium 로직으로 분기 가능
+        cleaned_text = re.sub(r'\n+', '\n', full_text) # [Common] 토큰 절약을 위해 연속 줄바꿈 제거
+        truncated_text = cleaned_text[:6000] 
 
         # =========================================================
-        # 5. GPT 분석 (연차 추출 + 요약)
+        # 4. GPT 브랜드 적합성 판단 및 요약 [Common: AI 큐레이션]
         # =========================================================
-        print("--- GPT 분석 요청 ---")
+        print("--- GPT 브랜드 적합성 판단 및 분석 요청 ---")
         client_openai = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
 
+        # [Common] 제외 조건 및 브랜드 가이드라인 설정
+        exclude_positions = "인플루언서 마케팅, 퍼포먼스 마케팅, 그로스 해킹/그로스 마케팅 관련 모든 포지션"
+
         gpt_prompt = f"""
-        [역할]
-        너는 스타트업 채용 정보를 분석하여 핵심 정보를 추출하고, 매력적인 소개글을 작성하는 에디터야.
+        너는 스타트업 채용 정보를 우리 브랜드 가이드에 맞춰 선별하는 전문 에디터야.
+
+        [필터링 규칙]
+        - 다음 직군에 해당하면 반드시 'is_suitable': false로 처리해: {exclude_positions}
+        - 위 직군이 아니고, 일반적인 기획, 개발, 디자인, 전략 등 브랜드에 적합한 직군이면 true로 처리해.
 
         [지시 사항]
-        아래 [채용 공고 본문]을 읽고 다음 정보를 JSON 포맷으로 추출해줘.
-
-        1. **required_exp**: 지원 자격에 명시된 '경력/연차' 요건을 짧게 추출. (예: "신입", "3년 이상", "5~7년", "무관" 등)
-        2. **summary**: 이 포지션의 주요 업무와 회사의 매력을 구직자에게 어필하듯 부드러운 '해요'체로 2~3문장 요약.
-
-        [출력 예시 - JSON]
-        {{
-            "required_exp": "3년 이상",
-            "summary": "글로벌 핀테크 서비스의 서버 개발을 담당해요. 자율적인 근무 환경과 최신 기술 스택을 경험할 수 있는 기회입니다."
-        }}
+        아래 [채용 공고 본문]을 읽고 JSON 포맷으로 응답해줘.
+        1. **is_suitable**: 적합 여부 (true/false)
+        2. **reason**: 적합/부적합 판단 이유 (한 문장)
+        3. **required_exp**: 경력 요건 (예: 3년 이상, 무관 등)
+        4. **summary**: (적합할 경우만) '해요'체로 작성한 매력적인 2~3문장 요약.
 
         [채용 공고 본문]
         {truncated_text}
@@ -161,67 +125,58 @@ def main():
 
         try:
             completion = client_openai.chat.completions.create(
-                model="gpt-4o",  # JSON 모드 사용을 위해 gpt-4o 또는 gpt-4-turbo 권장
+                model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": "JSON 형식으로만 응답하세요."},
+                    {"role": "system", "content": "JSON 형식으로만 응답하며, 제외 직군 여부를 엄격히 판단하세요."},
                     {"role": "user", "content": gpt_prompt}
                 ],
-                response_format={"type": "json_object"}, 
+                response_format={"type": "json_object"},
                 temperature=0.3,
             )
             
-            gpt_response = completion.choices[0].message.content
-            gpt_data = json.loads(gpt_response)
-
-            extracted_exp = gpt_data.get('required_exp', '공고 본문 확인')
-            extracted_summary = gpt_data.get('summary', '요약을 생성하지 못했습니다.')
+            gpt_data = json.loads(completion.choices[0].message.content)
+            is_suitable = gpt_data.get('is_suitable', False)
+            reason = gpt_data.get('reason', '판단 근거 없음')
+            extracted_exp = gpt_data.get('required_exp', '본문 확인')
+            extracted_summary = gpt_data.get('summary', '')
 
         except Exception as e:
-            print(f"⚠️ GPT 처리 중 오류 발생: {e}")
-            extracted_exp = "확인 필요"
-            extracted_summary = "요약 생성 실패 (본문 내용을 확인해주세요)"
-
-        print("--- GPT 응답 완료 ---")
+            print(f"⚠️ GPT 처리 오류: {e}")
+            return
 
         # =========================================================
-        # 6. 슬랙 전송 & 시트 업데이트
+        # 5. 분기 처리 및 결과 발송 [Common: 조건별 사후 처리]
         # =========================================================
         
-        # 메시지 조립
-        # 포맷: <오늘 올라온 채용 공고> -> 공고명 -> 기업명 -> 포지션명 -> 연차 -> 요약 -> URL(링크변환)
-        
-        slack_message = f"*<오늘 올라온 채용 공고>*\n\n"
-        slack_message += f"*{project_title}*\n\n"
-        slack_message += f"*기업명:* {company_name}\n"
-        slack_message += f"*연차:* {extracted_exp}\n\n"
-        slack_message += f"*요약*\n{extracted_summary}\n\n"
-        slack_message += f"🔗 <{target_url}|공고 바로가기>"
+        # [Case 1] 브랜드 부적합 포지션일 경우
+        if not is_suitable:
+            print(f"⏩ [제외 대상] {reason}")
+            sheet.update_cell(update_row_index, 6, 'excluded') # 시트 상태를 'excluded'로 변경
+            return
 
-        print("--- 최종 메시지 미리보기 ---")
-        print(slack_message)
+        # [Case 2] 적합한 포지션일 경우 슬랙 전송
+        slack_message = (
+            f"*<오늘 올라온 채용 공고>*\n\n"
+            f"*{project_title}*\n\n"
+            f"*기업명:* {company_name}\n"
+            f"*연차:* {extracted_exp}\n\n"
+            f"*요약*\n{extracted_summary}\n\n"
+            f"🔗 <{target_url}|공고 바로가기>"
+        )
 
         print("--- 슬랙 전송 시작 ---")
         webhook_url = os.environ['SLACK_WEBHOOK_URL']
-        
-        payload = {"text": slack_message}
-        slack_res = requests.post(webhook_url, json=payload)
+        slack_res = requests.post(webhook_url, json={"text": slack_message})
 
         if slack_res.status_code == 200:
             print("✅ 슬랙 전송 성공!")
-            
-            try:
-                # 상태 업데이트 (F열 = 6번째 열)
-                print(f"▶ 시트 업데이트 중... (행: {update_row_index}, 열: 6)")
-                sheet.update_cell(update_row_index, 6, 'published')
-                print("✅ 상태 변경 완료 (archived -> published)")
-            except Exception as e:
-                print(f"⚠️ 시트 업데이트 실패: {e}")
+            sheet.update_cell(update_row_index, 6, 'published') # 시트 상태를 'published'로 변경
+            print("✅ 상태 변경 완료 (archived -> published)")
         else:
-            print(f"❌ 전송 실패 (Code: {slack_res.status_code})")
-            print(slack_res.text)
+            print(f"❌ 슬랙 전송 실패: {slack_res.status_code}")
 
     except Exception as e:
-        print(f"\n❌ 에러 발생: {e}")
+        print(f"\n❌ 시스템 에러 발생: {e}")
 
 if __name__ == "__main__":
     main()
