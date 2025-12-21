@@ -45,75 +45,56 @@ def get_driver():
 # [전용] 데이터 수집 로직 (제공해주신 HTML 구조 반영)
 def scrape_projects():
     driver = get_driver()
+    driver.set_window_size(1920, 1080) # 실행 창 크기 명시
     new_data = []
     today = datetime.now().strftime("%Y-%m-%d")
-    urls_check = set()
     
     try:
+        print(f"🔗 접속 중: {CONFIG['url']}")
         driver.get(CONFIG["url"])
-        wait = WebDriverWait(driver, 25)
-        # 공고 링크(제목)가 나타날 때까지 대기
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/jd/']")))
-        time.sleep(5)
+        
+        # 1. 페이지 로딩 대기 강화
+        time.sleep(10) # 충분한 초기 로딩 시간 부여
+        
+        # 2. 공고 카드가 실제로 존재하는지 체크
+        cards = driver.find_elements(By.CSS_SELECTOR, "a[href*='/jd/']")
+        print(f"🔍 발견된 공고 카드 개수: {len(cards)}개")
 
-        # 공고 아이템들을 감싸고 있는 상위 컨테이너를 찾거나, 개별 공고 섹션을 식별합니다.
-        # 오퍼센트 리스트는 보통 각 공고가 특정 단위(article 또는 div)로 묶여 있습니다.
-        for _ in range(8): # 필요에 따라 스크롤 횟수 조절
-            # 공고 제목 링크를 기준으로 각 공고 단위를 찾습니다.
-            job_elements = driver.find_elements(By.CSS_SELECTOR, "div.x78zum5.xdt5ytf.x1iyjqo2") # 일반적인 카드 컨테이너 클래스 (상황에 따라 조정 가능)
-            
-            # 만약 위 선택자가 안 잡힐 경우를 대비해, 제목(a태그)의 부모 요소를 탐색하는 방식으로 접근
-            cards = driver.find_elements(By.CSS_SELECTOR, "a[href*='/jd/']")
+        if len(cards) == 0:
+            # 카드가 없다면 페이지 소스 일부 출력 (디버깅용)
+            print("❗ 공고 카드를 찾지 못했습니다. 선택자를 확인하세요.")
+            return []
 
-            for card in cards:
+        for card in cards:
+            try:
+                href = card.get_attribute("href")
+                title = card.text.strip()
+                
+                # 부모 요소를 못 찾을 경우를 대비해 예외 처리 강화
                 try:
-                    # 1. 제목 및 URL 추출
-                    title = card.text.strip()
-                    href = card.get_attribute("href")
+                    # 제공하신 HTML 구조상 a태그 상위에 정보가 있으므로 탐색 시도
+                    # 만약 아래 구문에서 에러가 나면 텍스트를 못 가져옵니다.
+                    parent = card.find_element(By.XPATH, "./ancestor::div[contains(@class, 'x1n2onr6')][1]")
+                    company = parent.find_element(By.CSS_SELECTOR, 'span[data-variant="body-02"]').text.strip()
+                    info = parent.find_element(By.CSS_SELECTOR, 'span[data-variant="body-03"]').text.strip()
                     
-                    # 2. 공고 카드의 부모 요소로부터 회사명과 지역/경력 정보 추출
-                    # 보통 a태그 주변의 div들에서 정보를 찾습니다.
-                    parent_container = card.find_element(By.XPATH, "./ancestor::div[contains(@class, 'x1n2onr6')][1]") 
+                    print(f"✅ 수집 성공: {company} - {title}")
                     
-                    # 회사명 추출 (data-variant="body-02")
-                    company_el = parent_container.find_element(By.CSS_SELECTOR, 'span[data-variant="body-02"]')
-                    company_name = company_el.text.strip()
+                    # (이하 기존 분리 로직 동일...)
+                    location = info.split('·')[0].strip() if '·' in info else info
+                    experience = info.split('·')[1].strip() if '·' in info else ""
                     
-                    # 지역 및 경력 추출 (data-variant="body-03")
-                    info_el = parent_container.find_element(By.CSS_SELECTOR, 'span[data-variant="body-03"]')
-                    info_text = info_el.text.strip() # 예: "서울특별시 양천구 · 경력 무관"
-                    
-                    location = ""
-                    experience = ""
-                    if "·" in info_text:
-                        parts = info_text.split("·")
-                        location = parts[0].strip()
-                        experience = parts[1].strip()
-                    else:
-                        location = info_text
-                    
-                    # 중복 체크 및 저장
-                    data_id = f"{href}_{title}"
-                    if data_id not in urls_check:
-                        new_data.append({
-                            'company': company_name,
-                            'title': title,
-                            'location': location,
-                            'experience': experience,
-                            'url': href,
-                            'scraped_at': today
-                        })
-                        urls_check.add(data_id)
-                except:
+                    new_data.append({
+                        'company': company, 'title': title, 'location': location,
+                        'experience': experience, 'url': href, 'scraped_at': today
+                    })
+                except Exception as inner_e:
+                    print(f"⚠️ 개별 카드 분석 실패 ({title}): {inner_e}")
                     continue
-            
-            # 스크롤 내리기
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(3)
-
+            except:
+                continue
     finally: 
         driver.quit()
-    
     return new_data
     
 # [공통] 시트 데이터 업데이트
