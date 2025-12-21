@@ -48,7 +48,7 @@ def get_driver():
     return driver
 
 # ==========================================
-# [전용] 오퍼센트 사이트 데이터 수집 로직 (스크롤 강화 버전)
+# [전용] 오퍼센트 사이트 데이터 수집 로직 (단계별 스크롤 강화)
 # ==========================================
 def scrape_projects():
     driver = get_driver()
@@ -60,55 +60,46 @@ def scrape_projects():
         print(f"🔗 접속 중: {CONFIG['url']}")
         driver.get(CONFIG["url"])
         wait = WebDriverWait(driver, 20)
-        
-        # [전용 선택자] 제목 클래스 xqzk367가 나타날 때까지 대기
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a.xqzk367")))
         
         # ------------------------------------------------------
-        # 무한 스크롤 로직: 더 이상 새로운 공고가 없을 때까지 내림
+        # [강화] 픽셀 단위 단계별 스크롤 (조금씩 끊어서 내리기)
         # ------------------------------------------------------
-        last_height = driver.execute_script("return document.body.scrollHeight")
-        scroll_count = 0
-        max_scrolls = 15  # 수집량에 따라 이 숫자를 늘리세요.
+        print("📥 공고를 더 많이 불러오기 위해 정밀 스크롤을 시작합니다...")
         
-        print("📥 모든 공고를 불러오기 위해 스크롤을 시작합니다...")
-        while scroll_count < max_scrolls:
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(3)  # 로딩 대기 (사이트 속도에 따라 2~4초 조절)
+        # 한 번에 1000픽셀씩 총 15번 내려가며 로딩 대기
+        for i in range(1, 16):
+            # 현재 위치에서 1000픽셀 아래로 이동
+            driver.execute_script(f"window.scrollBy(0, 1000);")
+            time.sleep(2)  # 각 구간 로딩 대기
             
-            new_height = driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height:
-                print("🏁 더 이상 불러올 공고가 없습니다.")
-                break
-            last_height = new_height
-            scroll_count += 1
-            print(f"🔄 스크롤 중... ({scroll_count}/{max_scrolls})")
+            # 중간중간 카드가 늘어나는지 체크용 로그
+            current_cards = driver.find_elements(By.CSS_SELECTOR, "a.xqzk367[href*='/jd/']")
+            print(f"🔄 정밀 스크롤 중... ({i}/15) | 현재까지 발견: {len(current_cards)}개")
+            
+            # 너무 많이 내려갔을 경우를 대비해 마지막엔 끝까지 한번 더 밀어주기
+            if i == 15:
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(3)
 
-        # 스크롤 완료 후 전체 카드 리스트 확보
+        # 최종 카드 리스트 확보
         cards = driver.find_elements(By.CSS_SELECTOR, "a.xqzk367[href*='/jd/']")
-        print(f"🔍 총 발견된 공고 카드 개수: {len(cards)}개")
+        print(f"🔍 최종 분석 대상 공고: {len(cards)}개")
 
         for card in cards:
             try:
                 title = card.text.strip()
                 full_href = card.get_attribute("href")
-                clean_url = full_href.split('?')[0] # URL 파라미터 정제
+                clean_url = full_href.split('?')[0]
                 
-                # [유연한 탐색] a태그의 부모 요소를 타고 올라가며 정보 탐색
+                # 부모 요소를 타고 올라가며 정보 탐색
                 container = card.find_element(By.XPATH, "..") 
-                
-                company_name = "회사명 미상"
-                location = ""
-                experience = ""
+                company_name, location, experience = "회사명 미상", "", ""
 
-                # 상위로 5단계까지만 올라가며 회사명(body-02)과 정보(body-03)가 있는지 확인
                 for _ in range(5):
                     try:
-                        # 1. 회사명 찾기 (body-02)
                         company_el = container.find_element(By.CSS_SELECTOR, 'span[data-variant="body-02"]')
                         company_name = company_el.text.strip()
-                        
-                        # 2. 지역/경력 찾기 (body-03)
                         info_el = container.find_element(By.CSS_SELECTOR, 'span[data-variant="body-03"]')
                         info_text = info_el.text.strip()
                         
@@ -123,20 +114,13 @@ def scrape_projects():
                     except:
                         container = container.find_element(By.XPATH, "..")
 
-                # 중복 데이터 수집 방지
                 data_id = f"{clean_url}_{title}"
                 if data_id not in urls_check:
                     new_data.append({
-                        'company': company_name,
-                        'title': title,
-                        'location': location,
-                        'experience': experience,
-                        'url': clean_url,
-                        'scraped_at': today
+                        'company': company_name, 'title': title, 'location': location,
+                        'experience': experience, 'url': clean_url, 'scraped_at': today
                     })
                     urls_check.add(data_id)
-                    # 상세 로그는 너무 많을 수 있으니 생략하거나 필요시 주석 해제
-                    # print(f"✅ 추출: {company_name} | {title}")
 
             except Exception:
                 continue
