@@ -66,17 +66,19 @@ try:
         print(f"\n🔍 {update_row_index}행 검토 중: {project_title}")
 
         try:
-            # 3. 웹 스크래핑 보완 (403 Forbidden 방지를 위한 강력한 헤더 추가)
+            # 3. [403 Forbidden 해결] 브라우저 위장 헤더 강화
             headers_ua = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Referer': 'https://www.google.com/'
+                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://www.google.com/',
+                'Cache-Control': 'no-cache',
             }
             resp = requests.get(target_url, headers=headers_ua, timeout=15)
             resp.raise_for_status()
             
             soup = BeautifulSoup(resp.text, 'html.parser')
-            text_content = " ".join([p.get_text().strip() for p in soup.find_all(['p', 'h2', 'h3']) if len(p.get_text().strip()) > 20])
+            text_content = " ".join([p.get_text().strip() for p in soup.find_all(['p', 'h2', 'h3', 'li']) if len(p.get_text().strip()) > 10])
             truncated_text = text_content[:3500]
 
             # 4. 적합성 판단
