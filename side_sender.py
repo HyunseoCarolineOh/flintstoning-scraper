@@ -148,7 +148,7 @@ try:
             # 6. 슬랙 전송
             blocks = [
                 {"type": "section", "text": {"type": "mrkdwn", "text": "*사이드프로젝트 동료 찾고 있어요*"}},
-                {"type": "section", "text": {"type": "mrkdwn", "text": f"* {project_title}* ┃ *팀원 모집*"}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": f"* {project_title}*"}},
                 {
                     "type": "section",
                     "fields": [
