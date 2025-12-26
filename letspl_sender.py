@@ -6,167 +6,174 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
+import random
+import time
 
 # =========================================================
 # 1. 설정 및 인증
 # =========================================================
 try:
-    print("--- [Letspl Sender] 시작 ---")
+    print("--- [Letspl Sender] 프로세스를 시작합니다 ---")
     
-    json_creds = os.environ['GOOGLE_CREDENTIALS']
-    creds_dict = json.loads(json_creds)
+    if 'GOOGLE_CREDENTIALS' not in os.environ:
+        raise Exception("환경변수 GOOGLE_CREDENTIALS가 설정되지 않았습니다.")
+
+    creds_dict = json.loads(os.environ['GOOGLE_CREDENTIALS'])
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
 
-    # 시트 열기
     spreadsheet = client.open('플린트스토닝 소재 DB')
     
-    # [수정] 다섯 번째 탭 선택 (Index 0, 1, 2, 3, "4")
-    sheet = spreadsheet.get_worksheet(4)
-
-    # 데이터 가져오기
-    data = sheet.get_all_values()
-    if not data:
-        print("데이터가 없습니다.")
-        exit()
-
-    headers = data.pop(0)
-    df = pd.DataFrame(data, columns=headers)
-
-    # =========================================================
-    # 2. 필터링 (F열: archived, publish: TRUE)
-    # =========================================================
-    if len(df.columns) <= 5:
-        print("열 개수가 부족합니다.")
-        exit()
-
-    col_f = df.columns[5] # F열 (6번째)
+    # GID 1669656972 기반 시트 선택
+    TARGET_GID = 1669656972
+    sheet = next((s for s in spreadsheet.worksheets() if s.id == TARGET_GID), None)
     
-    # 조건 확인 (archived & TRUE)
-    condition = (df[col_f].str.strip() == 'archived') & (df['publish'].str.strip() == 'TRUE')
-    target_rows = df[condition]
+    if not sheet:
+        raise Exception(f"GID가 {TARGET_GID}인 워크시트를 찾을 수 없습니다.")
+    
+    data = sheet.get_all_values()
+    headers = [h.strip() for h in data[0]]
+    df = pd.DataFrame(data[1:], columns=headers)
+
+    # 컬럼 설정
+    COL_STATUS = 'status'
+    COL_IDENTITY = 'identity_match'
+    COL_TITLE = 'title'     
+    COL_URL = 'url'         
+    COL_LOCATION = 'location' 
+
+    target_rows = df[df[COL_STATUS].str.strip().str.lower() == 'archived']
 
     if target_rows.empty:
-        print("발송할 대상(archived & publish=TRUE)이 없습니다.")
+        print("ℹ️ 'archived' 상태의 프로젝트가 없습니다.")
         exit()
 
-    # 첫 번째 행 선택
-    row = target_rows.iloc[0]
-    update_row_index = row.name + 2
-    
-    print(f"▶ 선택된 행 번호: {update_row_index}")
-
-    # =========================================================
-    # 3. 데이터 추출
-    # =========================================================
-    
-    # A열(제목), C열(URL)은 기존 위치 유지 (필요 시 이것도 헤더명으로 변경 가능)
-    project_title = row.iloc[0]
-    target_url = row.iloc[2]
-    
-    # [수정] 'location' 헤더 이름으로 지역 정보 가져오기
-    # 엑셀 파일의 헤더에 'location' 이라고 적혀 있어야 합니다.
-    try:
-        project_location = row['location']
-    except KeyError:
-        print("⚠️ 'location' 헤더를 찾을 수 없습니다. 컬럼명을 확인해주세요.")
-        project_location = "지역 정보 없음"
-
-    print(f"▶ 제목: {project_title}")
-    print(f"▶ 지역: {project_location}")
-    print(f"▶ URL: {target_url}")
-
-    # =========================================================
-    # 4. 웹 스크래핑
-    # =========================================================
-    print("--- 스크래핑 시작 ---")
-    headers_ua = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-    
-    response = requests.get(target_url, headers=headers_ua, timeout=10)
-    if response.status_code != 200:
-        print(f"접속 실패 (상태 코드: {response.status_code})")
-        exit()
-
-    soup = BeautifulSoup(response.text, 'html.parser')
-    paragraphs = soup.find_all('p')
-    full_text = " ".join([p.get_text() for p in paragraphs])
-    truncated_text = full_text[:3000]
-
-    # =========================================================
-    # 5. GPT 요약
-    # =========================================================
-    print("--- GPT 요약 요청 ---")
+    identity_col_idx = headers.index(COL_IDENTITY) + 1
+    status_col_idx = headers.index(COL_STATUS) + 1
     client_openai = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
-
-    # 프롬프트: '프로젝트 요약'과 '이런 분을 찾고 있어요' 두 파트로 분리 요청
-    gpt_prompt = f"""
-    너는 채용 공고나 프로젝트 정보를 정리해주는 '전문 에디터'야.
-    아래 [글 내용]을 읽고, 지정된 **출력 양식**을 엄격하게 지켜서 답변해.
-    모든 텍스트에 이모지를 절대 사용하지 마.
-
-    [출력 양식]
-    *프로젝트 요약*
-    (프로젝트의 핵심 내용을 2~3문장으로 요약)
-
-    *이런 분을 찾고 있어요*
-    - (추천 대상 1)
-    - (추천 대상 2)
-
-    [글 내용]
-    {truncated_text}
-    """
-
-    completion = client_openai.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are a strict output formatter. Do not use emojis."},
-            {"role": "user", "content": gpt_prompt}
-        ]
-    )
-
-    gpt_body = completion.choices[0].message.content
-
-    # =========================================================
-    # 6. 슬랙 전송
-    # =========================================================
-    
-    # [최종 메시지 조립]
-    # 1. 헤더: <사이드프로젝트 동료 찾고 있어요>
-    # 2. 정보: 공고명, 지역
-    # 3. 내용: GPT 요약 내용
-    # 4. 링크: '아티클 바로가기' 텍스트에 URL 적용
-    
-    final_message = f"*<사이드프로젝트 동료 찾고 있어요>*\n\n" \
-                    f"*{project_title}*\n\n" \
-                    f"*지역:* {project_location}\n\n" \
-                    f"{gpt_body}\n\n" \
-                    f"🔗 <{target_url}|게시글 바로가기>"
-    
-    print("--- 최종 결과물 ---")
-    print(final_message)
-
-    print("--- 슬랙 전송 시작 ---")
     webhook_url = os.environ['SLACK_WEBHOOK_URL']
-    payload = {"text": final_message}
     
-    slack_res = requests.post(webhook_url, json=payload)
-    
-    # ... (이하 동일)
-    
-    if slack_res.status_code == 200:
-        print("✅ 슬랙 전송 성공!")
+    # 차단 우회를 위한 세션 생성
+    session = requests.Session()
+
+    # =========================================================
+    # 2. 메인 루프
+    # =========================================================
+    for index, row in target_rows.iterrows():
+        update_row_index = int(index) + 2
+        project_title = row[COL_TITLE]
+        target_url = row[COL_URL]
         
+        # 시트 내 지역 정보 확보
+        sheet_location = row.get(COL_LOCATION, "").strip() 
+        
+        print(f"\n🔍 {update_row_index}행 검토 중: {project_title}")
+
         try:
-            print(f"▶ 시트 상태 업데이트 중... (행: {update_row_index}, 열: 6)")
-            sheet.update_cell(update_row_index, 6, 'published')
-            print("✅ 상태 변경 완료 (archived -> published)")
-        except Exception as e:
-            print(f"⚠️ 상태 업데이트 실패: {e}")
+            # 3. [403 Forbidden 해결] 강력한 브라우저 위장 및 랜덤 대기
+            headers_ua = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://www.google.com/',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
+            }
+
+            # 봇 감지 방지 랜덤 대기 (2.5~4.5초)
+            time.sleep(random.uniform(2.5, 4.5))
+
+            resp = session.get(target_url, headers=headers_ua, timeout=15)
+            resp.raise_for_status()
             
-    else:
-        print(f"❌ 전송 실패 (상태 코드: {slack_res.status_code})")
-        print(slack_res.text)
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            text_content = " ".join([p.get_text().strip() for p in soup.find_all(['p', 'h2', 'h3', 'li', 'span']) if len(p.get_text().strip()) > 10])
+            truncated_text = text_content[:3500]
+
+            # 4. [적합성 판단] 에디팅 포지션 여부 엄격 필터링
+            identity_prompt = f"""
+            안녕하세요, 당신은 에디터 공동체 'ANTIEGG'의 프로젝트 큐레이터입니다. 
+            아래 프로젝트가 에디터들이 참여하기 적합한 '콘텐츠 관련 사이드 프로젝트'인지 판단해 주세요.
+
+            [판단 기준]
+            1. 프로젝트 자체의 성격보다 **'모집 중인 역할(Role)'**이 중요합니다.
+            2. 에디터, 콘텐츠 마케터, 작가, 뉴스레터 기획자, 스토리 작가, 교정교열 등 '텍스트'와 '콘텐츠' 중심의 포지션이 없다면 탈락시키세요.
+            3. 단순히 개발자, 디자이너만 모집하는 프로젝트는 FALSE를 반환하세요.
+
+            [내용] {truncated_text}
+            출력 포맷(JSON): {{"is_appropriate": true/false, "reason": ""}}
+            """
+            check_res = client_openai.chat.completions.create(
+                model="gpt-4o-mini",
+                response_format={ "type": "json_object" },
+                messages=[{"role": "user", "content": identity_prompt}]
+            )
+            judgment = json.loads(check_res.choices[0].message.content)
+            
+            time.sleep(1)
+            sheet.update_cell(update_row_index, identity_col_idx, str(judgment['is_appropriate']).upper())
+
+            if not judgment['is_appropriate']:
+                print(f"⚠️ 에디팅 포지션 없음 (탈락)")
+                continue
+
+            # 5. [슬랙 생성] 에디터 맞춤형 추천사 (지역/직무 추론 포함)
+            summary_prompt = f"""
+            당신은 ANTIEGG의 프로젝트 큐레이터입니다. 동료들에게 이 프로젝트를 세련되게 소개해 주세요.
+            
+            1. inferred_role: 본문을 분석하여 에디터가 맡을 수 있는 가장 적합한 '모집 포지션'을 한 단어로 추출해 주세요.
+            2. summary: 프로젝트의 정체성과 핵심 기능을 설명하는 2개의 문장을 작성해 주세요. 
+               - **주의**: 'ANTIEGG는~'로 시작하지 마세요. 프로젝트 자체를 주어로 하거나 문장형으로 작성해 주세요.
+            4. recommendations: 에디터들에게 구미가 당길만한 구체적인 이유 3가지. 
+               - **지침**: '열심히 할 분' 같은 일반적인 말은 금지. 
+               - **예시**: "브랜드의 보이스앤톤을 직접 설계해보고 싶은 분", "독립 잡지 출판의 전 과정을 경험하고 싶은 분", "텍스트 기반 커뮤니티의 운영 로직을 배우고 싶은 분" 등 직무적 성장과 연결할 것.
+               - 문구 내 '에디터' 단어 직접 사용 금지, 끝맺음은 "~한 분"으로 통일.
+            4. inferred_location: 본문을 분석하여 '활동 지역' 추출 (예: 서울 강남, 온라인 등).
+            
+            어투: 매우 정중하고 지적인 경어체 (~합니다).
+            [내용] {truncated_text}
+            출력 포맷(JSON): {{"inferred_role": "", "inferred_location": "", "summary": [], "recommendations": []}}
+            """
+            summary_res = client_openai.chat.completions.create(
+                model="gpt-4o-mini",
+                response_format={ "type": "json_object" },
+                messages=[{"role": "user", "content": summary_prompt}]
+            )
+            gpt_res = json.loads(summary_res.choices[0].message.content)
+            
+            # 지역 정보 결정: 시트값 우선 -> 없으면 GPT 추론값
+            final_location = sheet_location if sheet_location else gpt_res.get('inferred_location', '온라인 (협의 가능)')
+            
+            # 6. 슬랙 전송
+            blocks = [
+                {"type": "section", "text": {"type": "mrkdwn", "text": "*사이드프로젝트 동료 찾고 있어요*"}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": f"* {project_title}*"}},
+                {
+                    "type": "section",
+                    "fields": [
+                        {"type": "mrkdwn", "text": f"*모집 포지션*\n{gpt_res.get('inferred_role', '콘텐츠 기획자')}"},
+                        {"type": "mrkdwn", "text": f"*지역*\n{final_location}"}
+                    ]
+                },
+                {"type": "divider"},
+                {"type": "section", "text": {"type": "mrkdwn", "text": "📌 *프로젝트 요약*\n" + "\n".join([f"• {s}" for s in gpt_res.get('summary', [])])}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": "📌 *이런 분께 추천해요*\n" + "\n".join([f"• {r}" for r in gpt_res.get('recommendations', [])])}},
+                {"type": "divider"},
+                {"type": "actions", "elements": [{"type": "button", "text": {"type": "plain_text", "text": "프로젝트 보러가기", "emoji": True}, "style": "primary", "url": target_url}]}
+            ]
+            
+            requests.post(webhook_url, json={"blocks": blocks})
+            time.sleep(1)
+            sheet.update_cell(update_row_index, status_col_idx, 'published')
+            print(f"✅ 전송 성공: {project_title}")
+            break 
+
+        except Exception as e:
+            print(f"❌ {update_row_index}행 처리 오류: {e}")
+            continue
 
 except Exception as e:
-    print(f"\n❌ 에러 발생: {e}")
+    print(f"❌ 치명적 오류: {e}")
+finally:
+    print("--- 모든 프로세스가 종료되었습니다 ---")
