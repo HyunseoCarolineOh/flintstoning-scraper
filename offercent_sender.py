@@ -8,12 +8,13 @@ from bs4 import BeautifulSoup
 from openai import OpenAI
 import random
 import time
+import re
 
 # =========================================================
 # 1. 설정 및 인증
 # =========================================================
 try:
-    print("--- [Recruit Sender] 채용 공고 프로세스를 시작합니다 ---")
+    print("--- [Recruit Sender] 최종 프로세스를 시작합니다 ---")
     
     if 'GOOGLE_CREDENTIALS' not in os.environ:
         raise Exception("환경변수 GOOGLE_CREDENTIALS가 설정되지 않았습니다.")
@@ -24,25 +25,18 @@ try:
     client = gspread.authorize(creds)
 
     spreadsheet = client.open('플린트스토닝 소재 DB')
-    
-    TARGET_GID = 639559541
+    TARGET_GID = 1818966683
     sheet = next((s for s in spreadsheet.worksheets() if s.id == TARGET_GID), None)
     
     if not sheet:
-        raise Exception(f"GID가 {TARGET_GID}인 워크시트를 찾을 수 없습니다.")
+        raise Exception(f"GID {TARGET_GID} 시트를 찾을 수 없습니다.")
     
     data = sheet.get_all_values()
     headers = [h.strip() for h in data[0]]
     df = pd.DataFrame(data[1:], columns=headers)
 
-    # 컬럼 설정
-    COL_STATUS = 'status'
-    COL_IDENTITY = 'identity_match'
-    COL_TITLE = 'title'     
-    COL_URL = 'url'         
-    COL_LOCATION = 'location' 
-    COL_EXPERIENCE = 'experience'
-    COL_COMPANY = 'company' # 회사명 컬럼 추가
+    COL_STATUS, COL_IDENTITY, COL_TITLE = 'status', 'identity_match', 'title'
+    COL_URL, COL_LOCATION, COL_EXPERIENCE, COL_COMPANY = 'url', 'location', 'experience', 'company'
 
     target_rows = df[df[COL_STATUS].str.strip().str.lower() == 'archived']
 
@@ -62,25 +56,31 @@ try:
     # =========================================================
     for index, row in target_rows.iterrows():
         update_row_index = int(index) + 2
-        raw_title = row[COL_TITLE]
-        target_url = row[COL_URL]
         
-        # 시트 데이터 직접 참조 (회사명, 지역, 경력)
+        # 제목 정제: [] 제거
+        original_title = row[COL_TITLE]
+        cleaned_title = re.sub(r'\[.*?\]', '', original_title).strip()
+        
+        target_url = row[COL_URL]
         sheet_company = row.get(COL_COMPANY, "회사명 미상").strip() or "회사명 미상"
         sheet_location = row.get(COL_LOCATION, "정보 없음").strip() or "정보 없음"
         sheet_experience = row.get(COL_EXPERIENCE, "경력 무관").strip() or "경력 무관"
         
-        print(f"\n🔍 {update_row_index}행 검토 중: {raw_title}")
+        print(f"\n🔍 {update_row_index}행 검토 중: {cleaned_title}")
 
         try:
-            # 3. 차단 우회 헤더
+            # 3. 브라우저 위장 및 차단 우회
             headers_ua = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
                 'Referer': 'https://www.google.com/',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'cross-site'
             }
 
-            time.sleep(random.uniform(2.5, 4.5))
+            time.sleep(random.uniform(3.0, 5.0))
             resp = session.get(target_url, headers=headers_ua, timeout=15)
             resp.raise_for_status()
             
@@ -88,7 +88,7 @@ try:
             text_content = " ".join([p.get_text().strip() for p in soup.find_all(['p', 'h2', 'h3', 'li', 'span', 'div']) if len(p.get_text().strip()) > 10])
             truncated_text = text_content[:3800]
 
-            # 4. 적합성 판단
+            # 4. 적합성 판단 (JSON 에러 방지용 문구 포함)
             identity_prompt = f"""
             당신은 에디터 공동체 'ANTIEGG'의 전문 큐레이터입니다. 아래 채용 공고를 분석하여 에디팅 직무인지 판단하세요.
 
@@ -100,22 +100,26 @@ try:
             - 영상 편집, 디자인, 개발 위주의 공고
             - 텍스트 작업이 부차적인 단순 마케팅 퍼포먼스 공고
             - 사이드 프로젝트(채용이 아닌 경우)
+
+            [내용] {truncated_text}
             """
             check_res = client_openai.chat.completions.create(
                 model="gpt-4o-mini",
                 response_format={ "type": "json_object" },
-                messages=[{"role": "user", "content": identity_prompt}]
+                messages=[
+                    {"role": "system", "content": "You must respond in json format with the key 'is_appropriate' (boolean)."},
+                    {"role": "user", "content": identity_prompt}
+                ]
             )
-            judgment = json.loads(check_res.choices[0].message.content)
+            is_appropriate = json.loads(check_res.choices[0].message.content).get('is_appropriate', False)
             
             time.sleep(1)
-            sheet.update_cell(update_row_index, identity_col_idx, str(judgment['is_appropriate']).upper())
+            sheet.update_cell(update_row_index, identity_col_idx, str(is_appropriate).upper())
 
-            if not judgment.get('is_appropriate', False):
-                print(f"⚠️ 부적합 판정 스킵.")
+            if not is_appropriate:
                 continue
 
-            # 5. 슬랙 내용 생성 (원문 유지 및 경력 수치 제외)
+            # 5. 슬랙 내용 생성 (원문 유지 및 JSON 에러 방지)
             summary_prompt = f"""
             동료 에디터들을 위해 채용 공고 요약을 작성해 주세요. 
             [지침]:
@@ -123,24 +127,24 @@ try:
                - 반드시 원문에 있는 표현을 최대한 그대로 사용하세요.
                - **필수 지침**: 'requirements(요구 역량)' 항목에서 "경력 00년 이상", "N년 이상의 경험" 등 경력/기간과 관련된 모든 수치 표현은 반드시 제외하고 실무 역량만 포함하세요.
                - 각 항목은 3개 내외의 리스트로 구성하세요.
-               - 'recommendations' 항목은 에디터에게 추천하는 이유 3가지 (끝맺음: "~한 분", '에디터' 단어 사용 금지)로 구성하세요. 
-            
+               - 'recommendations' 항목은 에디터에게 추천하는 이유 3가지 (끝맺음: "~한 분", '에디터' 단어 사용 금지)로 구성하세요
             [내용] {truncated_text}
-            출력 포맷(JSON): {{"roles": [], "requirements": [], "preferences": [], "recommendations": []}}
             """
             summary_res = client_openai.chat.completions.create(
                 model="gpt-4o-mini",
                 response_format={ "type": "json_object" },
-                messages=[{"role": "user", "content": summary_prompt}]
+                messages=[
+                    {"role": "system", "content": "You are a professional editor. Respond in json format with keys: 'roles', 'requirements', 'preferences', 'recommendations' (all lists)."},
+                    {"role": "user", "content": summary_prompt}
+                ]
             )
             gpt_res = json.loads(summary_res.choices[0].message.content)
             
-            # 최종 제목 구성: [회사명] 정제된제목
             display_title = f"[{sheet_company}] {cleaned_title}"
             
-            # 6. 슬랙 전송
+            # 6. 슬랙 전송 (image_93bb86 UI 구현)
             blocks = [
-                {"type": "section", "text": {"type": "mrkdwn", "text": "✨ *오늘 올라온 채용 공고*"}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": "*오늘 올라온 채용 공고*"}},
                 {"type": "section", "text": {"type": "mrkdwn", "text": f"*{display_title}*"}},
                 {
                     "type": "section",
@@ -162,14 +166,14 @@ try:
             
             time.sleep(1)
             sheet.update_cell(update_row_index, status_col_idx, 'published')
-            print(f"✅ 전송 성공: {display_title}")
+            print(f"✅ 성공: {display_title}")
             break 
 
         except Exception as e:
-            print(f"❌ 오류 발생: {e}")
+            print(f"❌ 에러 발생: {e}")
             continue
 
 except Exception as e:
-    print(f"❌ 치명적 오류: {e}")
+    print(f"❌ 치명적 에러: {e}")
 finally:
     print("--- 모든 프로세스가 종료되었습니다 ---")
