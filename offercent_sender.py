@@ -136,7 +136,7 @@ try:
             [지침]:
             1. roles, requirements, preferences, recommendations 키를 사용하세요.
             2. **중요**: 각 항목은 반드시 **최대 3개의 불릿**으로만 구성하세요.
-            3. **문구 유지**: 원문의 표현을 최대한 그대로 사용하세요.
+            3. **문구 유지**: roles, requirements, preferences에서 원문의 표현을 최대한 그대로 사용하세요.
             4. **경력 삭제**: requirements에서 "N년 경력" 등 모든 숫자 형태의 경력 요건은 삭제하세요.
             5. 'recommendations'는 "~한 분"으로 끝맺음하세요.
 
