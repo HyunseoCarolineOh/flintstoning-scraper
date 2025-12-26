@@ -108,17 +108,26 @@ try:
 
             # 5. 슬랙 메시지 생성 (에디터 중심 추천)
             summary_prompt = f"""
-            당신은 ANTIEGG의 큐레이터입니다. 동료 에디터를 위한 추천사를 작성해 주세요.
-            1. key_points: 핵심 맥락 4문장.
-            2. recommendations: 이 글이 꼭 필요한 에디터를 3가지 유형으로 제안 (~한 분).
-            어투: 정중하고 지적인 경어체.
-            [글 내용] {truncated_text}
+            당신은 ANTIEGG의 인사이트 큐레이터입니다. 지적이고 세련된 어투로 아래 글을 소개해 주세요.
+
+            1. key_points: 본문의 핵심 맥락을 짚어주는 4개의 문장을 작성해 주세요.
+            2. recommendations: 이 글이 꼭 필요한 에디터를 3가지 유형으로 제안해 주세요. 
+               - **핵심 지침**: 추천 대상은 반드시 '에디터'의 업무, 고민, 성장과 연결되어야 합니다.
+               - 추천 문구 예시: "새로운 브랜드 스토리텔링 방식을 고민하는 분", "글의 깊이를 더할 문화적 관점이 필요한 분"
+               - 추천 대상 끝맺음: "~한 분" (예: ~하는 분, ~를 찾는 분)
+               - 주의: 기업 리소스 효율화 관련 내용은 제외해 주세요.
+
+            어투: 매우 정중하고 지적인 경어체 (~합니다, ~해드립니다).
+            [글 내용]
+            {truncated_text}
+
             출력 포맷(JSON): {{"key_points": [], "recommendations": []}}
             """
+            
             summary_res = client_openai.chat.completions.create(
                 model="gpt-4o-mini",
                 response_format={ "type": "json_object" },
-                messages=[{"role": "system", "content": "당신은 지적이고 다정한 ANTIEGG의 큐레이터입니다."},
+                messages=[{"role": "system", "content": "당신은 지적이고 다정한 ANTIEGG의 큐레이터입니다. 모든 추천은 동료 에디터를 향합니다."},
                           {"role": "user", "content": summary_prompt}]
             )
             gpt_res = json.loads(summary_res.choices[0].message.content)
