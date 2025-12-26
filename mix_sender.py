@@ -21,8 +21,19 @@ try:
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
 
+    # 스프레드시트 열기
     spreadsheet = client.open('플린트스토닝 소재 DB')
-    sheet = spreadsheet.get_worksheet(2) 
+    
+    # [수정 사항 1] gid(981623942)를 기반으로 워크시트 찾기
+    TARGET_GID = 981623942
+    sheet = None
+    for s in spreadsheet.worksheets():
+        if s.id == TARGET_GID:
+            sheet = s
+            break
+    
+    if not sheet:
+        raise Exception(f"GID가 {TARGET_GID}인 워크시트를 찾을 수 없습니다.")
     
     data = sheet.get_all_values()
     headers = [h.strip() for h in data[0]]
@@ -64,7 +75,7 @@ try:
             text_content = " ".join([p.get_text().strip() for p in paragraphs if len(p.get_text().strip()) > 20])
             truncated_text = text_content[:3500]
 
-            # 4. ANTIEGG 정체성 판단 (엄격한 기준 및 사례 학습)
+            # 4. ANTIEGG 정체성 판단
             identity_prompt = f"""
             안녕하세요, 당신은 프리랜서 에디터 공동체 'ANTIEGG'의 편집장입니다. 
             아래 내용을 읽고 ANTIEGG의 정체성에 부합하는지 매우 엄격하게 판단해 주세요.
@@ -95,7 +106,6 @@ try:
             judgment = json.loads(check_res.choices[0].message.content)
             is_appropriate = judgment.get("is_appropriate", False)
             
-            # [상태 관리 2단계] identity_match 업데이트
             sheet.update_cell(update_row_index, identity_col_idx, str(is_appropriate).upper())
 
             if not is_appropriate:
@@ -105,12 +115,15 @@ try:
             # 5. 슬랙 메시지 생성
             print(f"✨ 적합 판정: 요약 메시지 생성을 시작합니다.")
             
+            # [수정 사항 2] '에디터'를 중심으로 한 추천사 생성 로직 반영
             summary_prompt = f"""
             당신은 ANTIEGG의 인사이트 큐레이터입니다. 지적이고 세련된 어투로 아래 글을 소개해 주세요.
 
             1. key_points: 본문의 핵심 맥락을 짚어주는 4개의 문장을 작성해 주세요.
-            2. recommendations: 이 글이 꼭 필요한 대상을 3가지 제안해 주세요. 
-               - 추천 대상 끝맺음: "~하신 분", "~를 찾으시는 분", "~가 고민이신 분"
+            2. recommendations: 이 글이 꼭 필요한 에디터를 3가지 유형으로 제안해 주세요. 
+               - **핵심 지침**: 추천 대상은 반드시 '에디터'의 업무, 고민, 성장과 연결되어야 합니다.
+               - 추천 문구 예시: "새로운 브랜드 스토리텔링 방식을 고민하는 에디터분", "글의 깊이를 더할 문화적 관점이 필요한 에디터분"
+               - 추천 대상 끝맺음: "~한 분" (예: ~하는 에디터분, ~를 찾는 에디터분)
                - 주의: 기업 리소스 효율화 관련 내용은 제외해 주세요.
 
             어투: 매우 정중하고 지적인 경어체 (~합니다, ~해드립니다).
@@ -123,7 +136,7 @@ try:
             summary_res = client_openai.chat.completions.create(
                 model="gpt-4o-mini",
                 response_format={ "type": "json_object" },
-                messages=[{"role": "system", "content": "당신은 지적이고 다정한 ANTIEGG의 큐레이터입니다."},
+                messages=[{"role": "system", "content": "당신은 지적이고 다정한 ANTIEGG의 큐레이터입니다. 모든 추천은 동료 에디터를 향합니다."},
                           {"role": "user", "content": summary_prompt}]
             )
             gpt_res = json.loads(summary_res.choices[0].message.content)
@@ -141,7 +154,6 @@ try:
             
             slack_resp = requests.post(webhook_url, json={"blocks": blocks})
 
-            # 7. 상태 업데이트
             if slack_resp.status_code == 200:
                 print("✅ 슬랙 전송에 성공하였습니다!")
                 sheet.update_cell(update_row_index, status_col_idx, 'published')
