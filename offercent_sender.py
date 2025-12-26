@@ -90,9 +90,16 @@ try:
 
             # 4. 적합성 판단
             identity_prompt = f"""
-            당신은 에디터 공동체의 커리어 큐레이터입니다. 아래 글이 '콘텐츠 에디터/기획자' 채용 공고인지 판단하세요.
-            [내용] {truncated_text}
-            출력 포맷(JSON): {{"is_appropriate": true/false}}
+            당신은 에디터 공동체 'ANTIEGG'의 전문 큐레이터입니다. 아래 채용 공고를 분석하여 에디팅 직무인지 판단하세요.
+
+            [적합 조건]
+            - 주요 업무가 글쓰기, 기획, 편집, 뉴스레터 제작, 스토리텔링인 경우
+            - '에디터', '콘텐츠 기획자', '카피라이터'와 같이 텍스트 중심의 포지션인 경우
+
+            [부적합 조건 (FALSE)]
+            - 영상 편집, 디자인, 개발 위주의 공고
+            - 텍스트 작업이 부차적인 단순 마케팅 퍼포먼스 공고
+            - 사이드 프로젝트(채용이 아닌 경우)
             """
             check_res = client_openai.chat.completions.create(
                 model="gpt-4o-mini",
@@ -112,15 +119,14 @@ try:
             summary_prompt = f"""
             동료 에디터들을 위해 채용 공고 요약을 작성해 주세요. 
             [지침]:
-            1. job_name: 본문에서 핵심 직무명을 찾아 짧게 작성하세요 (예: 콘텐츠 에디터).
-            2. roles, requirements, preferences, recommendations: 
+            1. roles, requirements, preferences, recommendations: 
                - 반드시 원문에 있는 표현을 최대한 그대로 사용하세요.
                - **필수 지침**: 'requirements(요구 역량)' 항목에서 "경력 00년 이상", "N년 이상의 경험" 등 경력/기간과 관련된 모든 수치 표현은 반드시 제외하고 실무 역량만 포함하세요.
                - 각 항목은 3개 내외의 리스트로 구성하세요.
                - 'recommendations' 항목은 에디터에게 추천하는 이유 3가지 (끝맺음: "~한 분", '에디터' 단어 사용 금지)로 구성하세요. 
             
             [내용] {truncated_text}
-            출력 포맷(JSON): {{"job_name": "", "roles": [], "requirements": [], "preferences": [], "recommendations": []}}
+            출력 포맷(JSON): {{"roles": [], "requirements": [], "preferences": [], "recommendations": []}}
             """
             summary_res = client_openai.chat.completions.create(
                 model="gpt-4o-mini",
@@ -129,12 +135,12 @@ try:
             )
             gpt_res = json.loads(summary_res.choices[0].message.content)
             
-            # 제목 형식: [회사명] 직무명
-            display_title = f"[{sheet_company}] {gpt_res.get('job_name', '콘텐츠 기획자')}"
+            # 최종 제목 구성: [회사명] 정제된제목
+            display_title = f"[{sheet_company}] {cleaned_title}"
             
             # 6. 슬랙 전송
             blocks = [
-                {"type": "section", "text": {"type": "mrkdwn", "text": "*오늘 올라온 채용 공고*"}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": "✨ *오늘 올라온 채용 공고*"}},
                 {"type": "section", "text": {"type": "mrkdwn", "text": f"*{display_title}*"}},
                 {
                     "type": "section",
@@ -160,7 +166,7 @@ try:
             break 
 
         except Exception as e:
-            print(f"❌ 처리 오류: {e}")
+            print(f"❌ 오류 발생: {e}")
             continue
 
 except Exception as e:
