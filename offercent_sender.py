@@ -14,7 +14,7 @@ import re
 # 1. 설정 및 인증
 # =========================================================
 try:
-    print("--- [Recruit Sender] 프로세스를 시작합니다 ---")
+    print("--- [Recruit Sender] 전체 자동화 프로세스를 시작합니다 ---")
     
     if 'GOOGLE_CREDENTIALS' not in os.environ:
         raise Exception("환경변수 GOOGLE_CREDENTIALS가 설정되지 않았습니다.")
@@ -44,11 +44,14 @@ try:
     COL_EXPERIENCE = 'experience'
     COL_COMPANY = 'company'
 
+    # 'archived' 상태인 모든 행 추출
     target_rows = df[df[COL_STATUS].str.strip().str.lower() == 'archived']
 
     if target_rows.empty:
-        print("ℹ️ 'archived' 상태의 공고가 없습니다.")
+        print("ℹ️ 처리할 'archived' 상태의 공고가 없습니다.")
         exit()
+
+    print(f"총 {len(target_rows)}건의 공고를 순차적으로 처리합니다.")
 
     identity_col_idx = headers.index(COL_IDENTITY) + 1
     status_col_idx = headers.index(COL_STATUS) + 1
@@ -58,7 +61,7 @@ try:
     session = requests.Session()
 
     # =========================================================
-    # 2. 메인 루프
+    # 2. 메인 루프 (모든 행 순회)
     # =========================================================
     for index, row in target_rows.iterrows():
         update_row_index = int(index) + 2
@@ -75,18 +78,15 @@ try:
         print(f"\n🔍 {update_row_index}행 검토 중: {cleaned_title}")
 
         try:
-            # 3. [403 Forbidden 해결] 브라우저 위장 헤더
+            # 3. [차단 우회] 브라우저 위장 헤더
             headers_ua = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
                 'Referer': 'https://www.google.com/',
-                'Sec-Fetch-Dest': 'document',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'cross-site'
             }
 
-            time.sleep(random.uniform(3.0, 5.0))
+            time.sleep(random.uniform(3.0, 6.0))
+            
             resp = session.get(target_url, headers=headers_ua, timeout=15)
             resp.raise_for_status()
             
@@ -94,18 +94,18 @@ try:
             text_content = " ".join([p.get_text().strip() for p in soup.find_all(['p', 'h2', 'h3', 'li', 'span', 'div']) if len(p.get_text().strip()) > 10])
             truncated_text = text_content[:3500]
 
-            # 4. [적합성 판단 프롬프트]
+            # 4. [적합성 판단]
             identity_prompt = f"""
-            당신은 에디터 공동체 'ANTIEGG'의 전문 큐레이터입니다. 
-            아래 채용 공고를 분석하여 에디팅 직무인지 판단하고 결과를 json 포맷으로 응답하세요.
+            당신은 에디터 공동체 'ANTIEGG'의 전문 큐레이터입니다. 아래 채용 공고를 분석하여 에디팅 직무인지 판단하세요.
 
             [적합 조건]
             - 주요 업무가 글쓰기, 기획, 편집, 뉴스레터 제작, 스토리텔링인 경우
-            - 포지션이 '에디터', '콘텐츠 기획자', '카피라이터'인 경우
+            - '에디터', '콘텐츠 기획자', '카피라이터'와 같이 텍스트 중심의 포지션인 경우
 
-            [부적합 조건]
+            [부적합 조건 (FALSE)]
             - 영상 편집, 디자인, 개발 위주의 공고
-            - 단순 마케팅 퍼포먼스나 운영 공고
+            - 텍스트 작업이 부차적인 단순 마케팅 퍼포먼스 공고
+            - 사이드 프로젝트(채용이 아닌 경우)
 
             [내용] {truncated_text}
             """
@@ -114,28 +114,31 @@ try:
                 model="gpt-4o-mini",
                 response_format={ "type": "json_object" },
                 messages=[
-                    {"role": "system", "content": "You are a job analyst. Respond only in json format with the key 'is_appropriate' (boolean)."},
+                    {"role": "system", "content": "You are a job analyst. Respond only in json format with key 'is_appropriate' (boolean)."},
                     {"role": "user", "content": identity_prompt}
                 ]
             )
             is_appropriate = json.loads(check_res.choices[0].message.content).get('is_appropriate', False)
             
+            # identity_match 컬럼 업데이트
             sheet.update_cell(update_row_index, identity_col_idx, str(is_appropriate).upper())
 
+            # [수정 포인트] 적합성 판단 결과가 FALSE인 경우
             if not is_appropriate:
-                print(f"⚠️ 에디팅 관련 공고가 아닙니다. (Skip)")
+                print(f"⚠️ 부적합 공고 판단: status를 'dropped'로 변경합니다.")
+                sheet.update_cell(update_row_index, status_col_idx, 'dropped') # status 변경
                 continue
 
-            # 5. [요약 생성 프롬프트]
+            # 5. [요약 생성] 3개 불릿 포인트 제한 프롬프트
             summary_prompt = f"""
-            동료 에디터들을 위해 채용 공고의 핵심 내용을 json 포맷으로 정리하세요. 
+            동료 에디터들을 위해 채용 공고를 json 포맷으로 정리하세요. 
 
             [지침]:
-            1. roles(주요 역할), requirements(요구 역량), preferences(우대 사항), recommendations(추천 이유)의 4개 키로 구성하세요.
-            2. **매우 중요**: 모든 항목은 원문에 있는 문구와 표현을 최대한 그대로 사용하세요. 임의로 요약하거나 말을 바꾸지 마세요.
-            3. **필수 삭제**: 'requirements(요구 역량)' 항목에서 "3년 이상", "N년 경력"과 같은 모든 '경력 기간/수치' 관련 표현은 반드시 삭제하고 실무 역량만 남기세요.
-            4. 'recommendations'는 에디터들이 매력을 느낄 포인트를 원문에서 찾아 "~한 분"으로 끝맺음하세요.
-            5. **분량 제한**: 각 항목(roles, requirements, preferences, recommendations)은 반드시 **최대 3개의 항목(불릿)**으로만 구성하세요. 가장 중요한 내용 위주로 선별하세요.
+            1. roles, requirements, preferences, recommendations 키를 사용하세요.
+            2. **중요**: 각 항목은 반드시 **최대 3개의 불릿**으로만 구성하세요.
+            3. **문구 유지**: 원문의 표현을 최대한 그대로 사용하세요.
+            4. **경력 삭제**: requirements에서 "N년 경력" 등 모든 숫자 형태의 경력 요건은 삭제하세요.
+            5. 'recommendations'는 "~한 분"으로 끝맺음하세요.
 
             [내용] {truncated_text}
             """
@@ -150,10 +153,8 @@ try:
             )
             gpt_res = json.loads(summary_res.choices[0].message.content)
             
-            # 최종 제목 구성
+            # 6. 슬랙 전송
             display_title = f"[{sheet_company}] {cleaned_title}"
-            
-            # 6. 슬랙 전송 (이미지 UI 반영)
             blocks = [
                 {"type": "section", "text": {"type": "mrkdwn", "text": "*오늘 올라온 채용 공고*"}},
                 {"type": "section", "text": {"type": "mrkdwn", "text": f"*{display_title}*"}},
@@ -173,18 +174,21 @@ try:
                 {"type": "actions", "elements": [{"type": "button", "text": {"type": "plain_text", "text": "상세 공고 보러가기", "emoji": True}, "style": "primary", "url": target_url}]}
             ]
             
-            requests.post(webhook_url, json={"blocks": blocks})
+            resp_slack = requests.post(webhook_url, json={"blocks": blocks})
             
-            time.sleep(1)
-            sheet.update_cell(update_row_index, status_col_idx, 'published')
-            print(f"✅ 전송 성공: {display_title}")
-            break 
+            if resp_slack.status_code == 200:
+                sheet.update_cell(update_row_index, status_col_idx, 'published')
+                print(f"✅ 전송 성공: {display_title}")
+            else:
+                print(f"❌ 슬랙 전송 실패 (상태 코드: {resp_slack.status_code})")
+
+            time.sleep(2)
 
         except Exception as e:
-            print(f"❌ 오류 발생: {e}")
+            print(f"❌ {update_row_index}행 처리 중 오류: {e}")
             continue
+
+    print("--- 모든 대기 중인 공고 처리가 완료되었습니다 ---")
 
 except Exception as e:
     print(f"❌ 치명적 오류: {e}")
-finally:
-    print("--- 모든 프로세스가 종료되었습니다 ---")
