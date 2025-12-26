@@ -6,6 +6,8 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
+import time
+import random
 
 # =========================================================
 # 1. 설정 및 인증
@@ -21,16 +23,11 @@ try:
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
 
-    # 스프레드시트 열기
     spreadsheet = client.open('플린트스토닝 소재 DB')
     
-    # [수정 사항 1] gid(981623942)를 기반으로 워크시트 찾기
+    # gid(981623942) 기반 워크시트 찾기
     TARGET_GID = 981623942
-    sheet = None
-    for s in spreadsheet.worksheets():
-        if s.id == TARGET_GID:
-            sheet = s
-            break
+    sheet = next((s for s in spreadsheet.worksheets() if s.id == TARGET_GID), None)
     
     if not sheet:
         raise Exception(f"GID가 {TARGET_GID}인 워크시트를 찾을 수 없습니다.")
@@ -44,11 +41,14 @@ try:
     COL_TITLE = 'title'
     COL_URL = 'url'
 
+    # 'archived' 상태인 모든 행 추출
     target_rows = df[df[COL_STATUS].str.strip().str.lower() == 'archived']
 
     if target_rows.empty:
         print("ℹ️ 'archived' 상태의 아티클이 현재 시트에 없습니다.")
         exit()
+
+    print(f"총 {len(target_rows)}건의 아티클 처리를 시작합니다.")
 
     identity_col_idx = headers.index(COL_IDENTITY) + 1
     status_col_idx = headers.index(COL_STATUS) + 1
@@ -56,18 +56,20 @@ try:
     webhook_url = os.environ['SLACK_WEBHOOK_URL']
 
     # =========================================================
-    # 2. 메인 루프: 적합한 아티클을 찾을 때까지 반복합니다.
+    # 2. 메인 루프: 모든 'archived' 행을 끝까지 순회합니다.
     # =========================================================
     for index, row in target_rows.iterrows():
         update_row_index = int(index) + 2
         project_title = row[COL_TITLE]
         target_url = row[COL_URL]
         
-        print(f"\n🔍 {update_row_index}행의 아티클을 검토하고 있습니다: {project_title}")
+        print(f"\n🔍 {update_row_index}행 검토 중: {project_title}")
 
         try:
-            # 3. 웹 스크래핑
-            headers_ua = {'User-Agent': 'Mozilla/5.0'}
+            # 3. 웹 스크래핑 (차단 방지를 위한 User-Agent 보강 및 대기)
+            headers_ua = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+            time.sleep(random.uniform(2.0, 4.0)) # 연속 요청 시 차단 방지
+            
             resp = requests.get(target_url, headers=headers_ua, timeout=15)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, 'html.parser')
@@ -90,32 +92,33 @@ try:
 
             [사례 학습 (Few-Shot)]
             - ✅ 적합: '네이버와 돌고래유괴단 협업', '제로클릭 시대의 마케팅', '마케터의 커뮤니티 운영 회고'.
-            - ❌ 부적합: '채팅 상담 개선기(UX/CS)', '무인 창업 아이템 추천', '단순 앱 프로젝트 성공기', '단순 채용 공고', '기업 성과 보도자료'.
+            - ❌ 부적합: '채팅 상담 개선기(UX/CS)', '무인 창업 아이템 추천', '단순 앱 프로젝트 성공기', '단순 채용 공고', '기업 성과 보도자료', '인플루언서'.
 
             [글 내용]
             {truncated_text}
-
-            출력 포맷(JSON): {{"is_appropriate": true/false, "reason": "위 기준과 사례를 바탕으로 판단 이유를 정중하게 설명해 주세요."}}
             """
+            
             check_res = client_openai.chat.completions.create(
                 model="gpt-4o-mini",
                 response_format={ "type": "json_object" },
-                messages=[{"role": "system", "content": "당신은 ANTIEGG의 정체성을 수호하는 엄격하고 전문적인 편집장입니다."},
-                          {"role": "user", "content": identity_prompt}]
+                messages=[
+                    {"role": "system", "content": "You are a professional editor. Respond only in json format with keys: 'is_appropriate' (boolean), 'reason' (string)."},
+                    {"role": "user", "content": identity_prompt}
+                ]
             )
             judgment = json.loads(check_res.choices[0].message.content)
             is_appropriate = judgment.get("is_appropriate", False)
             
+            # identity_match 업데이트
             sheet.update_cell(update_row_index, identity_col_idx, str(is_appropriate).upper())
 
+            # [수정 사항 2] 부적합 시 status를 'dropped'로 변경하고 다음 행으로 이동
             if not is_appropriate:
                 print(f"⚠️ 부적합 판정: {judgment.get('reason')}")
+                sheet.update_cell(update_row_index, status_col_idx, 'dropped')
                 continue
 
             # 5. 슬랙 메시지 생성
-            print(f"✨ 적합 판정: 요약 메시지 생성을 시작합니다.")
-            
-            # [수정 사항 2] '에디터'를 중심으로 한 추천사 생성 로직 반영
             summary_prompt = f"""
             당신은 ANTIEGG의 인사이트 큐레이터입니다. 지적이고 세련된 어투로 아래 글을 소개해 주세요.
             어투는 매우 정중하고 지적인 경어체 (~합니다, ~해드립니다)를 사용해 주세요. 
@@ -125,18 +128,18 @@ try:
                - **핵심 지침**: 추천 대상은 반드시 '에디터'의 업무, 고민, 성장과 연결되어야 합니다.
                - 추천 문구 예시: "새로운 브랜드 스토리텔링 방식을 고민하는 분", "글의 깊이를 더할 문화적 관점이 필요한 분"
                - 추천 대상 끝맺음: "~한 분" (예: ~하는 분, ~를 찾는 분)
-               
+            
             [글 내용]
             {truncated_text}
-
-            출력 포맷(JSON): {{"key_points": [], "recommendations": []}}
             """
             
             summary_res = client_openai.chat.completions.create(
                 model="gpt-4o-mini",
                 response_format={ "type": "json_object" },
-                messages=[{"role": "system", "content": "당신은 지적이고 다정한 ANTIEGG의 큐레이터입니다. 모든 추천은 동료 에디터를 향합니다."},
-                          {"role": "user", "content": summary_prompt}]
+                messages=[
+                    {"role": "system", "content": "Respond only in json format with keys: 'key_points', 'recommendations' (lists)."},
+                    {"role": "user", "content": summary_prompt}
+                ]
             )
             gpt_res = json.loads(summary_res.choices[0].message.content)
             
@@ -154,13 +157,14 @@ try:
             slack_resp = requests.post(webhook_url, json={"blocks": blocks})
 
             if slack_resp.status_code == 200:
-                print("✅ 슬랙 전송에 성공하였습니다!")
+                print("✅ 전송 성공")
                 sheet.update_cell(update_row_index, status_col_idx, 'published')
-                break 
             else:
-                print(f"❌ 전송 실패 (에러: {slack_resp.status_code})")
+                print(f"❌ 전송 실패 ({slack_resp.status_code})")
                 sheet.update_cell(update_row_index, status_col_idx, 'failed')
-                break
+
+            # [수정 사항 1] break를 제거하여 다음 행이 있으면 계속 진행합니다.
+            time.sleep(1) 
 
         except Exception as e:
             print(f"❌ 오류 발생: {e}")
@@ -170,4 +174,4 @@ try:
 except Exception as e:
     print(f"❌ 치명적 오류: {e}")
 finally:
-    print("--- [Mix Sender] 프로세스가 종료되었습니다 ---")
+    print("--- [Mix Sender] 모든 프로세스가 종료되었습니다 ---")
