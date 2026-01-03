@@ -123,10 +123,10 @@ try:
                 continue
 
             # 5. [슬랙 생성] 요약 및 추천사 (모집 포지션 관련 추출 제거)
-            summary_prompt = f"""
+            key_points_prompt = f"""
             당신은 ANTIEGG의 프로젝트 큐레이터입니다. 동료들에게 이 프로젝트를 세련되게 소개해 주세요.
             
-            1. summary: 프로젝트의 정체성과 핵심 기능을 설명하는 2개의 문장을 작성해 주세요. 
+            1. key_points: 프로젝트의 정체성과 핵심 기능을 설명하는 2개의 문장을 작성해 주세요. 
                - **주의**: 'ANTIEGG는~'로 시작하지 마세요. 프로젝트 자체를 주어로 하거나 문장형으로 작성해 주세요.
             2. recommendations: 에디터들에게 구미가 당길만한 구체적인 이유 3가지. 
                - **지침**: '열심히 할 분' 같은 일반적인 말은 금지. 
@@ -135,15 +135,15 @@ try:
             3. inferred_location: 본문을 분석하여 '활동 지역' 추출 (예: 서울 강남, 온라인 등).
             [내용] {truncated_text}
             """
-            summary_res = client_openai.chat.completions.create(
+            key_points_res = client_openai.chat.completions.create(
                 model="gpt-4o-mini",
                 response_format={ "type": "json_object" },
                 messages=[
-                    {"role": "system", "content": "Respond only in JSON format with keys: inferred_location, summary(list), recommendations(list)."},
-                    {"role": "user", "content": summary_prompt}
+                    {"role": "system", "content": "Respond only in JSON format with keys: inferred_location, key_points(list), recommendations(list)."},
+                    {"role": "user", "content": key_points_prompt}
                 ]
             )
-            gpt_res = json.loads(summary_res.choices[0].message.content)
+            gpt_res = json.loads(key_points_res.choices[0].message.content)
             
             final_location = sheet_location if sheet_location else gpt_res.get('inferred_location', '온라인 (협의 가능)')
             
@@ -158,7 +158,7 @@ try:
                     ]
                 },
                 {"type": "divider"},
-                {"type": "section", "text": {"type": "mrkdwn", "text": "📌 *프로젝트 요약*\n" + "\n".join([f"• {s}" for s in gpt_res.get('summary', [])])}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": "📌 *프로젝트 요약*\n" + "\n".join([f"• {s}" for s in gpt_res.get('key_points', [])])}},
                 {"type": "section", "text": {"type": "mrkdwn", "text": "📌 *이런 분께 추천해요*\n" + "\n".join([f"• {r}" for r in gpt_res.get('recommendations', [])])}},
                 {"type": "divider"},
                 {"type": "actions", "elements": [{"type": "button", "text": {"type": "plain_text", "text": "프로젝트 보러가기", "emoji": True}, "style": "primary", "url": target_url}]}
