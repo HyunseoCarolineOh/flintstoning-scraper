@@ -53,7 +53,7 @@ try:
     identity_col_idx = headers.index(COL_IDENTITY) + 1
     status_col_idx = headers.index(COL_STATUS) + 1
     client_openai = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
-    webhook_url = os.environ['SLACK_WEBHOOK_URL']
+    webhook_url = os.environ['SLACK_INSIGHT']
 
     # =========================================================
     # 2. 메인 루프: 모든 'archived' 행을 끝까지 순회합니다.
