@@ -11,7 +11,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # [설정]
 CONFIG = {
     "name": "렛플(Letspl)",
-    "url": "https://letspl.me/project?location=KR00&type=00&recruitingType=all&jobD=0207",
+    "url": "https://letspl.me/project?location=KR00&type=00&recruitingType=all&jobD=0207&skill=&interest=&keyword=",
     "gid": "1669656972"
 }
 
@@ -35,7 +35,7 @@ def get_driver():
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"})
     return driver
 
-# [전용] 데이터 수집 (누락 방지 이전 버전 - 안정화 및 오타 수정)
+# [전용] 데이터 수집
 def scrape_projects():
     driver = get_driver()
     new_data = []
@@ -48,29 +48,41 @@ def scrape_projects():
         wait = WebDriverWait(driver, 15)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href^='/project/']")))
         
-        # 이전 버전처럼 정해진 시간만큼만 대기 (스크롤 없음)
         time.sleep(5) 
         
         cards = driver.find_elements(By.CSS_SELECTOR, "a[href^='/project/']")
 
         for elem in cards:
             try:
-                # 1. 캐로셀(주목중) 카드 제외 (오타 수정 완료)
+                # 1. 캐로셀(주목중) 카드 제외
                 card_class = elem.get_attribute("class") or ""
                 if "Comment" in card_class or "newProject" in card_class:
                     continue
 
+                # --- [수정 구간: 콘텐츠 기획 필터링] ---
+                try:
+                    # 이미지에서 확인된 클래스명을 사용하여 직무 텍스트 추출
+                    job_info_elem = elem.find_element(By.CSS_SELECTOR, "span[class*='card_searchBottomJobinfoTxt']")
+                    job_text = job_info_elem.text.strip()
+                    
+                    # '콘텐츠 기획'이 포함되어 있지 않으면 스킵
+                    if "콘텐츠 기획" not in job_text:
+                        continue
+                except:
+                    # 직무 정보 요소가 아예 없는 카드라면 스킵
+                    continue
+                # ---------------------------------------
+
                 href = elem.get_attribute("href")
                 if not re.search(r'/project/\d+', href): continue
                 
-                # 2. 이전의 안정적인 제목 찾기 로직
+                # 2. 제목 찾기 로직
                 title = ""
                 try:
                     h3_elem = elem.find_element(By.TAG_NAME, "h3")
                     title_elem = h3_elem.find_element(By.CSS_SELECTOR, "span[class*='TitleTxt']")
                     title = title_elem.text.strip()
                 except:
-                    # h3 구조가 아닐 경우를 대비한 최소한의 백업
                     BAD_WORDS = ["팔로우", "주목중", "D-", "NEW", "렛플이"]
                     lines = elem.text.split('\n')
                     clean_lines = [l.strip() for l in lines if len(l.strip()) > 1 
@@ -83,12 +95,12 @@ def scrape_projects():
                 
                 if not any(d['url'] == href for d in new_data):
                     new_data.append({'title': title, 'url': href, 'scraped_at': today, 'location': loc})
-            except: 
+            except Exception as e:
+                # 개별 카드 처리 중 오류 시 다음 카드로 진행
                 continue
     finally: 
         driver.quit()
     return new_data
-
 # [공통] 스마트 저장
 def update_sheet(ws, data):
     if not data: return print(f"[{CONFIG['name']}] 새 데이터 없음")
