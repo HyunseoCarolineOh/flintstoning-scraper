@@ -59,14 +59,14 @@ def scrape_projects():
                 if "Comment" in card_class or "newProject" in card_class:
                     continue
 
-                # --- [수정 구간: 콘텐츠 기획 필터링] ---
+                # --- [수정 구간: 컨텐츠 기획 필터링] ---
                 try:
                     # 이미지에서 확인된 클래스명을 사용하여 직무 텍스트 추출
                     job_info_elem = elem.find_element(By.CSS_SELECTOR, "span[class*='card_searchBottomJobinfoTxt']")
                     job_text = job_info_elem.text.strip()
                     
-                    # '콘텐츠 기획'이 포함되어 있지 않으면 스킵
-                    if "콘텐츠 기획" not in job_text:
+                    # '컨텐츠 기획'이 포함되어 있지 않으면 스킵
+                    if "컨텐츠 기획" not in job_text:
                         continue
                 except:
                     # 직무 정보 요소가 아예 없는 카드라면 스킵
