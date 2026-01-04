@@ -151,7 +151,7 @@ try:
             
             # 6. 슬랙 전송
             blocks = [
-                {"type": "header", "text": {"type": "plain_text", "text": "지금 주목해야 할 아티클", "emoji": True}},
+                {"type": "header", "text": {"type": "plain_text", "text": "💡지금 주목해야 할 아티클", "emoji": True}},
                 {"type": "section", "text": {"type": "mrkdwn", "text": f"*{project_title}*"}},
                 {"type": "divider"},
                 {"type": "section", "text": {"type": "mrkdwn", "text": "📌 *이 글에서 이야기하는 것들*\n" + "\n".join([f"• {p}" for p in gpt_res.get('key_points', [])])}},
