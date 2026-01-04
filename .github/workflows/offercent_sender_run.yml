@@ -3,8 +3,8 @@ name: Offercent Sender Run
 on:
   workflow_dispatch:
   schedule:
-    # 매일 저녁 9시 (UTC 12:00)
-    - cron: '0 12 * * *'
+    # 매일 한국 시간 오전 8시 (UTC 22:00)
+    - cron: '0 23 * * *'
 
 
 jobs:
