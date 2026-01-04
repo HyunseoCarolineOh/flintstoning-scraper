@@ -1,8 +1,8 @@
 name: Surfit Scraper Run
 
-on:
-  schedule:
-    - cron: '0 0 * * *' # 매일 아침 9시 (한국시간)
+schedule:
+    # 매일 한국 시간 오전 5시 (UTC 00:00)
+    - cron: '0 20 * * *'
   workflow_dispatch: # 수동 실행 버튼
 
 jobs:
