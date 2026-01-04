@@ -109,35 +109,31 @@ try:
             어투: 매우 정중하고 지적인 경어체 (~합니다).
             [내용] {truncated_text}
             """
-            
-            key_points_res = client_openai.chat.completions.create(
+            summary_res = client_openai.chat.completions.create(
                 model="gpt-4o-mini",
                 response_format={ "type": "json_object" },
                 messages=[
-                    {"role": "system", "content": "Respond only in JSON format with keys: inferred_location, inferred_position, key_points(list), recommendations(list)."},
-                    {"role": "user", "content": key_points_prompt}
+                    {"role": "system", "content": "Respond only in JSON format with keys: inferred_role, inferred_location, summary(list), recommendations(list)."},
+                    {"role": "user", "content": summary_prompt}
                 ]
             )
-            gpt_res = json.loads(key_points_res.choices[0].message.content)
+            gpt_res = json.loads(summary_res.choices[0].message.content)
             
-            # --- 변수 할당 오류 수정 ---
-            inferred_position = gpt_res.get('inferred_position', '콘텐츠 기획자')
             final_location = sheet_location if sheet_location else gpt_res.get('inferred_location', '온라인 (협의 가능)')
             
-            # 6. 슬랙 전송
+            # 5. 슬랙 전송
             blocks = [
                 {"type": "section", "text": {"type": "mrkdwn", "text": "*사이드프로젝트 동료 찾고 있어요*"}},
                 {"type": "section", "text": {"type": "mrkdwn", "text": f"* {project_title}*"}},
                 {
                     "type": "section",
                     "fields": [
-                        {"type": "mrkdwn", "text": f"*모집 포지션*\n{inferred_position}"}, # 변수 정의 완료
+                        {"type": "mrkdwn", "text": f"*모집 포지션*\n콘텐츠 기획자"},
                         {"type": "mrkdwn", "text": f"*지역*\n{final_location}"}
                     ]
                 },
                 {"type": "divider"},
-                # gpt_res에서 가져오는 키를 'key_points'로 일치시킴
-                {"type": "section", "text": {"type": "mrkdwn", "text": "📌 *프로젝트 요약*\n" + "\n".join([f"• {s}" for s in gpt_res.get('key_points', [])])}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": "📌 *프로젝트 요약*\n" + "\n".join([f"• {s}" for s in gpt_res.get('summary', [])])}},
                 {"type": "section", "text": {"type": "mrkdwn", "text": "📌 *이런 분께 추천해요*\n" + "\n".join([f"• {r}" for r in gpt_res.get('recommendations', [])])}},
                 {"type": "divider"},
                 {"type": "actions", "elements": [{"type": "button", "text": {"type": "plain_text", "text": "프로젝트 보러가기", "emoji": True}, "style": "primary", "url": target_url}]}
