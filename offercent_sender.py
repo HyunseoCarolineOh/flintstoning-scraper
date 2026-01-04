@@ -178,7 +178,7 @@ try:
             # 6. 슬랙 전송
             display_title = f"[{sheet_company}] {cleaned_title}"
             blocks = [
-                {"type": "header", "text": {"type": "plain_text", "text": "오늘 올라온 채용 공고", "emoji": True}},
+                {"type": "header", "text": {"type": "plain_text", "text": "🆕오늘 올라온 채용 공고", "emoji": True}},
                 {"type": "section", "text": {"type": "mrkdwn", "text": f"*{display_title}*"}},
                 {
                     "type": "section",
@@ -188,10 +188,10 @@ try:
                     ]
                 },
                 {"type": "divider"},
-                {"type": "section", "text": {"type": "mrkdwn", "text": "📌 *주요 역할*\n" + "\n".join([f"• {r}" for r in gpt_res.get('roles', [])])}},
-                {"type": "section", "text": {"type": "mrkdwn", "text": "📌 *요구 역량*\n" + "\n".join([f"• {req}" for req in gpt_res.get('requirements', [])])}},
-                {"type": "section", "text": {"type": "mrkdwn", "text": "📌 *우대 사항*\n" + "\n".join([f"• {p}" for p in gpt_res.get('preferences', [])])}},
-                {"type": "section", "text": {"type": "mrkdwn", "text": "📌 *이런 분께 추천해요*\n" + "\n".join([f"• {rec}" for rec in gpt_res.get('recommendations', [])])}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": "🎯 *주요 역할*\n" + "\n".join([f"• {r}" for r in gpt_res.get('roles', [])])}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": "🧠 *요구 역량*\n" + "\n".join([f"• {req}" for req in gpt_res.get('requirements', [])])}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": "⭐ *우대 사항*\n" + "\n".join([f"• {p}" for p in gpt_res.get('preferences', [])])}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": "👍 *이런 분께 추천해요*\n" + "\n".join([f"• {rec}" for rec in gpt_res.get('recommendations', [])])}},
                 {"type": "divider"},
                 {"type": "actions", "elements": [{"type": "button", "text": {"type": "plain_text", "text": "상세 공고 보러가기", "emoji": True}, "style": "primary", "url": target_url}]}
             ]
