@@ -53,7 +53,7 @@ try:
 
     status_col_idx = headers.index(COL_STATUS) + 1
     client_openai = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
-    webhook_url = os.environ['SLACK_WEBHOOK_URL']
+    webhook_url = os.environ['SLACK_MOJIPGONGGO']
     
     session = requests.Session()
 
