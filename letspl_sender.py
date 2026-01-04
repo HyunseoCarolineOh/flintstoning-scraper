@@ -123,7 +123,7 @@ try:
             
             # 5. 슬랙 전송
             blocks = [
-                {"type": "header", "text": {"type": "plain_text", "text": "사이드프로젝트 동료 찾고 있어요", "emoji": True}},
+                {"type": "header", "text": {"type": "plain_text", "text": "🤝사이드프로젝트 동료 찾고 있어요", "emoji": True}},
                 {"type": "section", "text": {"type": "mrkdwn", "text": f"* {project_title}*"}},
                 {
                     "type": "section",
