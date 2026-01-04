@@ -38,7 +38,6 @@ try:
 
     # 컬럼 설정
     COL_STATUS = 'status'
-    COL_IDENTITY = 'identity_match'
     COL_TITLE = 'title'     
     COL_URL = 'url'         
     COL_LOCATION = 'location' 
@@ -52,7 +51,6 @@ try:
 
     print(f"총 {len(target_rows)}건의 프로젝트 처리를 시작합니다.")
 
-    identity_col_idx = headers.index(COL_IDENTITY) + 1
     status_col_idx = headers.index(COL_STATUS) + 1
     client_openai = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
     webhook_url = os.environ['SLACK_WEBHOOK_URL']
@@ -68,10 +66,10 @@ try:
         target_url = row[COL_URL]
         sheet_location = row.get(COL_LOCATION, "").strip() 
         
-        print(f"\n🔍 {update_row_index}행 검토 중: {project_title}")
+        print(f"\n🔍 {update_row_index}행 요약 및 전송 중: {project_title}")
 
         try:
-            # 3. [403 Forbidden 해결] 브라우저 위장 및 랜덤 대기
+            # 3. [브라우저 위장 및 랜덤 대기]
             headers_ua = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -80,7 +78,6 @@ try:
                 'Connection': 'keep-alive'
             }
 
-            # 봇 감지 방지 랜덤 대기
             time.sleep(random.uniform(3.0, 5.0))
 
             resp = session.get(target_url, headers=headers_ua, timeout=15)
@@ -90,51 +87,24 @@ try:
             text_content = " ".join([p.get_text().strip() for p in soup.find_all(['p', 'h2', 'h3', 'li', 'span']) if len(p.get_text().strip()) > 10])
             truncated_text = text_content[:3500]
 
-            # 4. [적합성 판단] 에디팅 포지션 여부 필터링
-            identity_prompt = f"""
-             안녕하세요, 당신은 에디터 공동체 'ANTIEGG'의 프로젝트 큐레이터입니다. 
-            아래 프로젝트가 에디터들이 참여하기 적합한 '콘텐츠 관련 사이드 프로젝트'인지 판단해 주세요.
-
-            [판단 기준]
-            1. 프로젝트 자체의 성격보다 **'모집 중인 역할(Role)'**이 중요합니다.
-            2. 에디터, 콘텐츠 마케터, 작가, 뉴스레터 기획자, 스토리 작가, 교정교열 등 '텍스트'와 '콘텐츠' 중심의 포지션이 없다면 탈락시키세요.
-            3. 단순히 개발자, 디자이너만 모집하는 프로젝트는 FALSE를 반환하세요.
-            [내용] {truncated_text}
-            출력 포맷(JSON): {{"is_appropriate": true/false, "reason": ""}}
-            """
-            check_res = client_openai.chat.completions.create(
-                model="gpt-4o-mini",
-                response_format={ "type": "json_object" },
-                messages=[
-                    {"role": "system", "content": "You are a professional project curator. Respond only in JSON format."},
-                    {"role": "user", "content": identity_prompt}
-                ]
-            )
-            judgment = json.loads(check_res.choices[0].message.content)
-            is_appropriate = judgment.get("is_appropriate", False)
-            
-            # identity_match 업데이트
-            time.sleep(1)
-            sheet.update_cell(update_row_index, identity_col_idx, str(is_appropriate).upper())
-
-            # [적용 사항 1] 부적합 시 status를 'dropped'로 변경하고 다음 행으로 이동
-            if not is_appropriate:
-                print(f"⚠️ 에디팅 포지션 없음: {judgment.get('reason')}")
-                sheet.update_cell(update_row_index, status_col_idx, 'dropped')
-                continue
-
-            # 5. [슬랙 생성]
+            # 4. [슬랙 콘텐츠 생성] 
             summary_prompt = f"""
-            당신은 ANTIEGG의 프로젝트 큐레이터입니다. 동료들에게 이 프로젝트를 세련되게 소개해 주세요.
-            
-            1. inferred_role: 본문을 분석하여 에디터가 맡을 수 있는 가장 적합한 '모집 포지션'을 한 단어로 추출해 주세요.
-            2. summary: 프로젝트의 정체성과 핵심 기능을 설명하는 2개의 문장을 작성해 주세요. 
-               - **주의**: 'ANTIEGG는~'로 시작하지 마세요. 프로젝트 자체를 주어로 하거나 문장형으로 작성해 주세요.
-            4. recommendations: 에디터들에게 구미가 당길만한 구체적인 이유 3가지. 
-               - **지침**: '열심히 할 분' 같은 일반적인 말은 금지. 
-               - **예시**: "브랜드의 보이스앤톤을 직접 설계해보고 싶은 분", "독립 잡지 출판의 전 과정을 경험하고 싶은 분", "텍스트 기반 커뮤니티의 운영 로직을 배우고 싶은 분" 등 직무적 성장과 연결할 것.
-               - 문구 내 '에디터' 단어 직접 사용 금지, 끝맺음은 "~한 분"으로 통일.
-            4. inferred_location: 본문을 분석하여 '활동 지역' 추출 (예: 서울 강남, 온라인 등).
+            당신은 ANTIEGG의 프로젝트 큐레이터입니다. 지적이고 세련된 어투로 아래 글을 소개해 주세요.
+            어투는 매우 정중하고 지적인 경어체 (~합니다, ~해드립니다)를 사용해 주세요. 
+            JSON 포맷으로 만들어 주세요. 
+            [지침]:      
+            1. key_points: 프로젝트의 정체성과 핵심 기능을 설명하는 문장을 3개 내외로 작성해 주세요.
+               - 첫 번째 문장 : 반드시 ‘이 프로젝트는~’을 주어로 시작해 주세요.
+               - 첫 번째 문장, 이후 : 주어를 생략하고, 앞 문맥을 자연스럽게 이어 주세요.
+               - 주의사항 : 각 불릿에는 반드시 하나의 문장만 포함해 주세요.
+               - 주의사항 : 'ANTIEGG는~'로 시작하지 마세요.
+            2. recommendations: 이 글이 꼭 필요한 에디터를 3가지 내외의 유형으로 제안해 주세요. 
+               - 주의사항 : '열심히 할 분' 같은 일반적인 말은 금지. 
+               - 문구 예시: "브랜드의 보이스앤톤을 직접 설계해보고 싶은 분", "독립 잡지 출판의 전 과정을 경험하고 싶은 분", "텍스트 기반 커뮤니티의 운영 로직을 배우고 싶은 분" 등 직무적 성장과 연결할 것.
+               - 끝맺음: "~한 분" (예: ~하는 분, ~를 찾는 분)
+               - 주의사항 : "에디터"라는 말을 직접 사용하지 말 것. 
+               - 주의사항 : 각 불릿에는 반드시 하나의 문장만 포함해 주세요.
+            3. inferred_location: 본문을 분석하여 '활동 지역' 추출 (예: 서울 강남, 온라인 등).
             
             어투: 매우 정중하고 지적인 경어체 (~합니다).
             [내용] {truncated_text}
@@ -151,7 +121,7 @@ try:
             
             final_location = sheet_location if sheet_location else gpt_res.get('inferred_location', '온라인 (협의 가능)')
             
-            # 6. 슬랙 전송
+            # 5. 슬랙 전송
             blocks = [
                 {"type": "section", "text": {"type": "mrkdwn", "text": "*사이드프로젝트 동료 찾고 있어요*"}},
                 {"type": "section", "text": {"type": "mrkdwn", "text": f"* {project_title}*"}},
@@ -179,12 +149,11 @@ try:
                 print(f"❌ 슬랙 전송 실패: {slack_resp.status_code}")
                 sheet.update_cell(update_row_index, status_col_idx, 'failed')
 
-            # [적용 사항 2] break를 제거하여 시트의 끝까지 반복하도록 합니다.
             time.sleep(1.5)
 
         except Exception as e:
             print(f"❌ {update_row_index}행 처리 오류: {e}")
-            if "429" in str(e): # 할당량 초과 시 대기
+            if "429" in str(e): 
                 time.sleep(60)
             continue
 
