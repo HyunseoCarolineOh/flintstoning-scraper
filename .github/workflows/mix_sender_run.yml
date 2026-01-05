@@ -28,6 +28,6 @@ jobs:
       env:
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_INSIGHT }}
       # [중요] mix_sender.py 실행
       run: python mix_sender.py
