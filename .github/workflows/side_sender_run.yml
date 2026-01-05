@@ -28,6 +28,6 @@ jobs:
       env:
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_INSIGHT }}
       # [수정됨] 실행할 파일 이름 변경 (main.py -> side_sender.py)
       run: python side_sender.py
