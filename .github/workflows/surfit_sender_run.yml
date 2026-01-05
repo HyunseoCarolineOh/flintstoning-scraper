@@ -28,6 +28,6 @@ jobs:
       env:
         GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_MOJIPGONGGO }}
+        SLACK_INSIGHT: ${{ secrets.SLACK_INSIGHT }}
       # [중요] 새로 만든 파일 실행
       run: python surfit_sender.py
