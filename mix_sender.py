@@ -1,4 +1,4 @@
-import os
+ㅜimport os
 import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -160,7 +160,15 @@ try:
                 {"type": "actions", "elements": [{"type": "button", "text": {"type": "plain_text", "text": "아티클 보러가기", "emoji": True}, "style": "primary", "url": target_url}]}
             ]
             
-            slack_resp = requests.post(webhook_url, json={"blocks": blocks})
+            # --- 수정된 부분: 이모지와 봇 이름을 설정합니다 ---
+            slack_payload = {
+                "blocks": blocks,
+                "icon_emoji": ":fried_egg:",  # 여기에 원하는 이모지 코드를 넣으세요 (예: :pencil2:, :egg:)
+                "username": "에그서치봇"  # 슬랙에 표시될 봇의 이름
+            }
+
+            # json=blocks 대신 json=slack_payload를 전송합니다.
+            slack_resp = requests.post(webhook_url, json=slack_payload)
 
             if slack_resp.status_code == 200:
                 print("✅ 전송 성공")
