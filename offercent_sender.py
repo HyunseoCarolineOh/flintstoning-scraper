@@ -39,7 +39,7 @@ try:
     COL_STATUS = 'status'
     COL_IDENTITY = 'identity_match'
     COL_TITLE = 'title'     
-    COL_URL = 'url'         
+    COL_URL = 'url'          
     COL_LOCATION = 'location' 
     COL_EXPERIENCE = 'experience'
     COL_COMPANY = 'company'
@@ -66,16 +66,15 @@ try:
     for index, row in target_rows.iterrows():
         update_row_index = int(index) + 2
         
-        # 제목 정제: [] 및 내부 텍스트 제거
-        original_title = row[COL_TITLE]
-        cleaned_title = re.sub(r'\[.*?\]', '', original_title).strip()
+        # 제목 정제 없이 스프레드시트의 원본 제목 그대로 사용
+        original_title = row[COL_TITLE].strip()
         
         target_url = row[COL_URL]
         sheet_company = row.get(COL_COMPANY, "회사명 미상").strip() or "회사명 미상"
         sheet_location = row.get(COL_LOCATION, "정보 없음").strip() or "정보 없음"
         sheet_experience = row.get(COL_EXPERIENCE, "경력 무관").strip() or "경력 무관"
         
-        print(f"\n🔍 {update_row_index}행 검토 중: {cleaned_title}")
+        print(f"\n🔍 {update_row_index}행 검토 중: {original_title}")
 
         try:
             # 3. [차단 우회] 브라우저 위장 헤더
@@ -94,7 +93,7 @@ try:
             text_content = " ".join([p.get_text().strip() for p in soup.find_all(['p', 'h2', 'h3', 'li', 'span', 'div']) if len(p.get_text().strip()) > 10])
             truncated_text = text_content[:3500]
 
-            # 4. [적합성 판단]
+            # 4. [적합성 판단] 사례 학습 포함
             identity_prompt = f"""
             당신은 에디터 공동체 'ANTIEGG'의 채용 큐레이터입니다. 아래 채용 공고가 ANTIEGG 기준의 ‘에디팅 직무’에 해당하는지 판단하세요.
 
@@ -104,7 +103,7 @@ try:
                 - 마케팅
                 - 콘텐츠
                 - 브랜드
-			- 단, 부적합 조건에 해당하면 예외적으로 FALSE 처리합니다.
+            - 단, 부적합 조건에 해당하면 예외적으로 FALSE 처리합니다.
             
             [부적합 조건 (FALSE)]
             - 채용 목적이 아닌 사이드 프로젝트, 커뮤니티 모집
@@ -129,13 +128,13 @@ try:
             # identity_match 컬럼 업데이트
             sheet.update_cell(update_row_index, identity_col_idx, str(is_appropriate).upper())
 
-            # [수정 포인트] 적합성 판단 결과가 FALSE인 경우
+            # 적합성 판단 결과가 FALSE인 경우
             if not is_appropriate:
                 print(f"⚠️ 부적합 공고 판단: status를 'dropped'로 변경합니다.")
-                sheet.update_cell(update_row_index, status_col_idx, 'dropped') # status 변경
+                sheet.update_cell(update_row_index, status_col_idx, 'dropped')
                 continue
 
-            # 5. [요약 생성] 3개 불릿 포인트 제한 프롬프트
+            # 5. [요약 생성] 프롬프트 전문 유지
             summary_prompt = f"""
             당신은 ANTIEGG의 채용 큐레이터입니다. 지적이고 세련된 어투로 아래 글을 소개해 주세요.
             어투는 매우 정중하고 지적인 경어체 (~합니다, ~해드립니다)를 사용해 주세요. 
@@ -176,13 +175,13 @@ try:
             gpt_res = json.loads(summary_res.choices[0].message.content)
             
             # 6. 슬랙 전송
-            display_title = f"[{sheet_company}] {cleaned_title}"
             blocks = [
                 {"type": "header", "text": {"type": "plain_text", "text": "🆕 오늘 올라온 채용 공고", "emoji": True}},
-                {"type": "section", "text": {"type": "mrkdwn", "text": f"*{display_title}*"}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": f"*{original_title}*"}},
                 {
                     "type": "section",
                     "fields": [
+                        {"type": "mrkdwn", "text": f"*회사*\n{sheet_company}"},
                         {"type": "mrkdwn", "text": f"*지역*\n{sheet_location}"},
                         {"type": "mrkdwn", "text": f"*경력*\n{sheet_experience}"}
                     ]
@@ -200,7 +199,7 @@ try:
             
             if resp_slack.status_code == 200:
                 sheet.update_cell(update_row_index, status_col_idx, 'published')
-                print(f"✅ 전송 성공: {display_title}")
+                print(f"✅ 전송 성공: {original_title}")
             else:
                 print(f"❌ 슬랙 전송 실패 (상태 코드: {resp_slack.status_code})")
 
