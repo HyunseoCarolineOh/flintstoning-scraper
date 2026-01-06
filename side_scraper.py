@@ -29,13 +29,13 @@ def get_worksheet():
 
 def get_driver():
     options = Options()
-    # 1. 필수 보안/성능 옵션
-    options.add_argument("--headless=new") # 최신 헤드리스 모드 사용
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
+    # 창 크기 추가 (요소가 숨겨지는 것 방지)
+    options.add_argument("--window-size=1920,1080") 
     
-    # 2. 봇 차단 우회의 핵심: 실제 브라우저처럼 보이게 하기
     user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
     options.add_argument(f"user-agent={user_agent}")
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -62,14 +62,28 @@ def scrape_projects():
     regions = ["서울", "경기", "인천", "대전", "대구", "부산", "광주", "울산", "세종", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주", "온라인"]
 
     try:
+        print(f"🌐 {CONFIG['url']} 접속 중...")
         driver.get(CONFIG["url"])
-        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "a")))
-        time.sleep(5)
         
-        for elem in driver.find_elements(By.TAG_NAME, "a"):
-            href = elem.get_attribute("href")
-            if href and "idx=" in href and "bmode=view" in href:
-                text = elem.text.strip()
+        # 1. 페이지 본문(body)이 로드될 때까지 대기
+        wait = WebDriverWait(driver, 20)
+        wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        
+        # 2. 사이트의 동적 로딩(JS)을 위해 충분한 시간 대기
+        # sideproject.co.kr는 리스트가 로딩되는 데 시간이 걸릴 수 있습니다.
+        time.sleep(7)
+        
+        # 3. 모든 a 태그 수집
+        elements = driver.find_elements(By.TAG_NAME, "a")
+        print(f"🔍 발견된 링크 수: {len(elements)}개")
+
+        for elem in elements:
+            try:
+                href = elem.get_attribute("href")
+                
+                # 상세 페이지 링크 패턴 확인 (idx와 bmode=view 포함 여부)
+                if href and "idx=" in href and "bmode=view" in href:
+                    text = elem.text.strip()
                 if not text: continue
                 
                 # 지역을 찾으면 해당 지역명을, 못 찾으면 빈 문자열("")을 할당합니다.
