@@ -178,7 +178,7 @@ try:
             # 6. 슬랙 전송
             display_title = f"[{sheet_company}] {cleaned_title}"
             blocks = [
-                {"type": "header", "text": {"type": "plain_text", "text": "🆕오늘 올라온 채용 공고", "emoji": True}},
+                {"type": "header", "text": {"type": "plain_text", "text": "🆕 오늘 올라온 채용 공고", "emoji": True}},
                 {"type": "section", "text": {"type": "mrkdwn", "text": f"*{display_title}*"}},
                 {
                     "type": "section",
