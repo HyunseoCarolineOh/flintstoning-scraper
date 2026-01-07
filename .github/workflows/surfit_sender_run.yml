@@ -3,8 +3,8 @@ name: Surfit Sender Run
 on:
   workflow_dispatch:
   schedule:
-    # 매일 한국 시간 오전 9시 (UTC 00:00)
-    - cron: '0 0 * * *'
+    # 매일 한국 시간 오전 8시 59분 (UTC 23:59)
+    - cron: '59 23 * * *'
 
 
 jobs:
