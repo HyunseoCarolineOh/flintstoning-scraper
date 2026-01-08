@@ -3,8 +3,8 @@ name: Letspl Sender Run
 on:
   workflow_dispatch:
   schedule:
-    # 매일 한국 시간 오전 8시 59분 (UTC 23:59)
-    - cron: '59 23 * * *'
+    # 매일 한국 시간 오전 8시 39분 (UTC 23:59)
+    - cron: '39 23 * * *'
 
 jobs:
   run-letspl:
