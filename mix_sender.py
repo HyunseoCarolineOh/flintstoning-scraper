@@ -56,7 +56,7 @@ try:
     webhook_url = os.environ['SLACK_INSIGHT']
 
     # =========================================================
-    # 2. 메인 루프: 모든 'archived' 행을 끝까지 순회합니다.
+    # 2. 메인 루프
     # =========================================================
     for index, row in target_rows.iterrows():
         update_row_index = int(index) + 2
@@ -66,9 +66,9 @@ try:
         print(f"\n🔍 {update_row_index}행 검토 중: {project_title}")
 
         try:
-            # 3. 웹 스크래핑 (차단 방지를 위한 User-Agent 보강 및 대기)
+            # 3. 웹 스크래핑
             headers_ua = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-            time.sleep(random.uniform(2.0, 4.0)) # 연속 요청 시 차단 방지
+            time.sleep(random.uniform(2.0, 4.0))
             
             resp = requests.get(target_url, headers=headers_ua, timeout=15)
             resp.raise_for_status()
@@ -93,7 +93,6 @@ try:
             - ✅ 적합: '네이버와 돌고래유괴단 협업', '제로클릭 시대의 마케팅', '마케터의 커뮤니티 운영 회고'.
             - ❌ 부적합: '채팅 상담 개선기(UX/CS)', '무인 창업 아이템 추천', '단순 앱 프로젝트 성공기', '단순 채용 공고', '기업 성과 보도자료', '인플루언서'.
 
-
             [글 내용]
             {truncated_text}
             """
@@ -108,13 +107,17 @@ try:
             )
             judgment = json.loads(check_res.choices[0].message.content)
             is_appropriate = judgment.get("is_appropriate", False)
+            drop_reason = judgment.get("reason", "사유 미상")
             
             # identity_match 업데이트
             sheet.update_cell(update_row_index, identity_col_idx, str(is_appropriate).upper())
 
-            # [수정 사항 2] 부적합 시 status를 'dropped'로 변경하고 다음 행으로 이동
+            # [수정] 부적합 시 상세 로그 출력 후 skip
             if not is_appropriate:
-                print(f"⚠️ 부적합 판정: {judgment.get('reason')}")
+                print("-" * 60)
+                print(f"🚫 [DROP] 부적합 아티클: {project_title}")
+                print(f"   ㄴ 사유: {drop_reason}")
+                print("-" * 60)
                 sheet.update_cell(update_row_index, status_col_idx, 'dropped')
                 continue
 
@@ -160,28 +163,25 @@ try:
                 {"type": "actions", "elements": [{"type": "button", "text": {"type": "plain_text", "text": "아티클 보러가기", "emoji": True}, "style": "primary", "url": target_url}]}
             ]
             
-            # --- 수정된 부분: 이모지와 봇 이름을 설정합니다 ---
             slack_payload = {
                 "blocks": blocks,
-                "icon_emoji": ":fried_egg:",  # 여기에 원하는 이모지 코드를 넣으세요 (예: :pencil2:, :egg:)
-                "username": "에그서치봇"  # 슬랙에 표시될 봇의 이름
+                "icon_emoji": ":fried_egg:",
+                "username": "에그서치봇"
             }
 
-            # json=blocks 대신 json=slack_payload를 전송합니다.
             slack_resp = requests.post(webhook_url, json=slack_payload)
 
             if slack_resp.status_code == 200:
-                print("✅ 전송 성공")
+                print(f"✅ 전송 성공: {project_title}")
                 sheet.update_cell(update_row_index, status_col_idx, 'published')
             else:
-                print(f"❌ 전송 실패 ({slack_resp.status_code})")
+                print(f"❌ 전송 실패 ({slack_resp.status_code}): {project_title}")
                 sheet.update_cell(update_row_index, status_col_idx, 'failed')
 
-            # [수정 사항 1] break를 제거하여 다음 행이 있으면 계속 진행합니다.
             time.sleep(1) 
 
         except Exception as e:
-            print(f"❌ 오류 발생: {e}")
+            print(f"❌ {update_row_index}행 처리 오류: {e}")
             sheet.update_cell(update_row_index, status_col_idx, 'failed')
             continue
 
